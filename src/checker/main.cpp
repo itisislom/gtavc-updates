@@ -1,16 +1,22 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wininet.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <commctrl.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cwchar>
+#include <string>
+#include <vector>
+#include <memory>
+#include "../common/paths.h"
+#include "../common/crypto.h"
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "wininet.lib")
 
-static const char* GITHUB_RELEASES_API = "https://api.github.com/repos/itisislom/gtavc-updates/releases?per_page=5";
-static const char* GITHUB_RAW_MANIFEST = "https://raw.githubusercontent.com/itisislom/gtavc-updates/main/version.json";
+static const wchar_t* GITHUB_RELEASES_API = L"https://api.github.com/repos/itisislom/gtavc-updates/releases?per_page=5";
+static const wchar_t* GITHUB_RAW_MANIFEST = L"https://raw.githubusercontent.com/itisislom/gtavc-updates/main/version.json";
 
 #define IDC_LIST_RELEASES   2001
 #define IDC_EDIT_DESC       2002
@@ -18,17 +24,18 @@ static const char* GITHUB_RAW_MANIFEST = "https://raw.githubusercontent.com/itis
 #define IDC_BTN_PLAY        2004
 
 typedef struct ReleaseItem {
-    char tag[64];
-    char version[64];
-    char name[128];
-    char date[32];
-    char downloadUrl[1024];
-    char body[2048];
+    wchar_t tag[64];
+    wchar_t version[64];
+    wchar_t name[128];
+    wchar_t date[32];
+    wchar_t downloadUrl[1024];
+    wchar_t sha256[65];
+    std::string body;
 } ReleaseItem;
 
 struct ManagerContext {
-    char localVer[64];
-    char gameDir[MAX_PATH];
+    wchar_t localVer[64];
+    wchar_t gameDir[MAX_PATH];
     HWND hParent;
     ReleaseItem releases[10];
     int releaseCount;
@@ -40,63 +47,88 @@ struct ManagerContext {
     HWND hHeader;
 };
 
-static void Log(const char* msg) {
-    FILE* f = fopen("UpdateChecker.log", "a");
-    if (f) {
-        fprintf(f, "%s\n", msg);
-        fclose(f);
-    }
-}
-
-static void GetGameDir(char* outDir, size_t maxLen) {
-    GetModuleFileNameA(NULL, outDir, (DWORD)maxLen);
-    char* lastSlash = strrchr(outDir, '\\');
+static void GetGameDirW(wchar_t* outDir, size_t maxLen) {
+    GetModuleFileNameW(NULL, outDir, (DWORD)maxLen);
+    wchar_t* lastSlash = wcsrchr(outDir, L'\\');
     if (lastSlash) {
-        *lastSlash = '\0';
+        *lastSlash = L'\0';
     } else {
-        strcpy_s(outDir, maxLen, ".");
+        wcscpy_s(outDir, maxLen, L".");
     }
 }
 
-static void ReadLocalVersion(const char* gameDir, char* outVer, size_t maxLen) {
-    char path[MAX_PATH];
-    sprintf_s(path, "%s\\version.txt", gameDir);
-    FILE* f = fopen(path, "r");
+static void GetUpdaterIniPath(const wchar_t* gameDir, wchar_t* outIniPath, size_t maxLen) {
+    wchar_t testFile[MAX_PATH];
+    swprintf_s(testFile, L"%s\\.write_test", gameDir);
+    HANDLE h = CreateFileW(testFile, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+        CloseHandle(h);
+        DeleteFileW(testFile);
+        swprintf_s(outIniPath, maxLen, L"%s\\updater.ini", gameDir);
+        return;
+    }
+
+    wchar_t localAppData[MAX_PATH];
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH) > 0) {
+        swprintf_s(outIniPath, maxLen, L"%s\\GTAVC-UpdateManager", localAppData);
+        CreateDirectoryW(outIniPath, NULL);
+        swprintf_s(outIniPath, maxLen, L"%s\\GTAVC-UpdateManager\\updater.ini", localAppData);
+        return;
+    }
+    swprintf_s(outIniPath, maxLen, L"%s\\updater.ini", gameDir);
+}
+
+static void ReadLocalVersionW(const wchar_t* gameDir, wchar_t* outVer, size_t maxLen) {
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%s\\version.txt", gameDir);
+    FILE* f = nullptr;
+    _wfopen_s(&f, path, L"r");
     if (f) {
-        if (fgets(outVer, (int)maxLen, f)) {
-            char* nl = strpbrk(outVer, "\r\n");
-            if (nl) *nl = '\0';
+        if (fgetws(outVer, (int)maxLen, f)) {
+            wchar_t* nl = wcspbrk(outVer, L"\r\n");
+            if (nl) *nl = L'\0';
         }
         fclose(f);
     } else {
-        strcpy_s(outVer, maxLen, "0.0.0");
+        wcscpy_s(outVer, maxLen, L"0.0.0");
     }
 }
 
-static BOOL HasShownUpdaterInfo(const char* gameDir) {
-    char path[MAX_PATH];
-    sprintf_s(path, "%s\\updater.ini", gameDir);
-    return GetPrivateProfileIntA("Updater", "InfoShown", 0, path) == 1;
+static BOOL HasShownUpdaterInfo(const wchar_t* iniPath) {
+    return GetPrivateProfileIntW(L"Updater", L"InfoShown", 0, iniPath) == 1;
 }
 
-static void MarkUpdaterInfoShown(const char* gameDir) {
-    char path[MAX_PATH];
-    sprintf_s(path, "%s\\updater.ini", gameDir);
-    WritePrivateProfileStringA("Updater", "InfoShown", "1", path);
+static void MarkUpdaterInfoShown(const wchar_t* iniPath) {
+    WritePrivateProfileStringW(L"Updater", L"InfoShown", L"1", iniPath);
 }
 
-// Version comparison helper: returns 1 if v1 > v2, -1 if v1 < v2, 0 if equal
-static int CompareSemanticVersions(const char* v1, const char* v2) {
+static int GetConfiguredHotkey(const wchar_t* iniPath) {
+    wchar_t keyStr[32] = { 0 };
+    GetPrivateProfileStringW(L"Updater", L"Hotkey", L"0", keyStr, 32, iniPath);
+
+    if (keyStr[0] >= L'0' && keyStr[0] <= L'9' && keyStr[1] == L'\0') {
+        return '0' + (keyStr[0] - L'0');
+    }
+    if ((keyStr[0] == L'f' || keyStr[0] == L'F') && keyStr[1] >= L'1' && keyStr[1] <= L'9') {
+        int fNum = _wtoi(keyStr + 1);
+        if (fNum >= 1 && fNum <= 12) {
+            return VK_F1 + (fNum - 1);
+        }
+    }
+    return '0';
+}
+
+static int CompareSemanticVersions(const wchar_t* v1, const wchar_t* v2) {
     int a1 = 0, a2 = 0, a3 = 0;
     int b1 = 0, b2 = 0, b3 = 0;
 
-    const char* p1 = v1;
-    if (*p1 == 'v' || *p1 == 'V') p1++;
-    const char* p2 = v2;
-    if (*p2 == 'v' || *p2 == 'V') p2++;
+    const wchar_t* p1 = v1;
+    if (*p1 == L'v' || *p1 == L'V') p1++;
+    const wchar_t* p2 = v2;
+    if (*p2 == L'v' || *p2 == L'V') p2++;
 
-    sscanf_s(p1, "%d.%d.%d", &a1, &a2, &a3);
-    sscanf_s(p2, "%d.%d.%d", &b1, &b2, &b3);
+    swscanf_s(p1, L"%d.%d.%d", &a1, &a2, &a3);
+    swscanf_s(p2, L"%d.%d.%d", &b1, &b2, &b3);
 
     if (a1 > b1) return 1;
     if (a1 < b1) return -1;
@@ -107,132 +139,243 @@ static int CompareSemanticVersions(const char* v1, const char* v2) {
     return 0;
 }
 
-static BOOL ExtractJsonString(const char* start, const char* end, const char* key, char* outVal, size_t maxLen) {
-    char pattern[128];
-    sprintf_s(pattern, sizeof(pattern), "\"%s\"", key);
-    const char* p = strstr(start, pattern);
-    if (!p || (end && p >= end)) return FALSE;
+static void SafeTruncateUtf8(std::string& s, size_t maxBytes) {
+    if (s.size() <= maxBytes) return;
 
-    p = strchr(p + strlen(pattern), ':');
-    if (!p || (end && p >= end)) return FALSE;
-    p++;
-    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-    if (*p != '\"') return FALSE;
-    p++;
+    size_t cut = maxBytes;
+    while (cut > 0 && ((unsigned char)s[cut] & 0xC0) == 0x80) {
+        cut--;
+    }
 
-    const char* q = p;
-    size_t outIdx = 0;
-    while (*q && (end == NULL || q < end)) {
-        if (*q == '\\') {
-            q++;
-            if (*q == '\"') { if (outIdx + 1 < maxLen) outVal[outIdx++] = '\"'; }
-            else if (*q == 'n') { if (outIdx + 2 < maxLen) { outVal[outIdx++] = '\r'; outVal[outIdx++] = '\n'; } }
-            else if (*q == 'r') { /* ignore */ }
-            else if (*q == 't') { if (outIdx + 1 < maxLen) outVal[outIdx++] = '\t'; }
-            else { if (outIdx + 1 < maxLen) outVal[outIdx++] = *q; }
-            q++;
-        } else if (*q == '\"') {
-            break;
+    if (cut < maxBytes) {
+        unsigned char lead = (unsigned char)s[cut];
+        size_t charLen = 1;
+        if ((lead & 0xE0) == 0xC0) charLen = 2;
+        else if ((lead & 0xF0) == 0xE0) charLen = 3;
+        else if ((lead & 0xF8) == 0xF0) charLen = 4;
+
+        if (cut + charLen > maxBytes) {
+            // Incomplete character does not fit: drop it
         } else {
-            if (outIdx + 1 < maxLen) outVal[outIdx++] = *q;
-            q++;
+            cut += charLen;
         }
     }
-    outVal[outIdx] = '\0';
-    return TRUE;
+
+    s.resize(cut);
+    s.append("...");
 }
 
-static int ParseReleasesFromJson(const char* json, ReleaseItem* items, int maxItems) {
+static bool ExtractJsonString(const std::string& json, size_t startPos, size_t endPos, const char* key, std::string& outVal) {
+    outVal.clear();
+    std::string pattern = std::string("\"") + key + "\"";
+    size_t p = json.find(pattern, startPos);
+    if (p == std::string::npos || (endPos != std::string::npos && p >= endPos)) return false;
+
+    p = json.find(':', p + pattern.size());
+    if (p == std::string::npos || (endPos != std::string::npos && p >= endPos)) return false;
+    p++;
+
+    while (p < json.size() && (json[p] == ' ' || json[p] == '\t' || json[p] == '\r' || json[p] == '\n')) p++;
+    if (p >= json.size() || json[p] != '\"') return false;
+    p++;
+
+    while (p < json.size() && (endPos == std::string::npos || p < endPos)) {
+        if (json[p] == '\\') {
+            p++;
+            if (p >= json.size()) break;
+            if (json[p] == '\"') outVal.push_back('\"');
+            else if (json[p] == 'n') { outVal.push_back('\r'); outVal.push_back('\n'); }
+            else if (json[p] == 'r') { /* ignore */ }
+            else if (json[p] == 't') outVal.push_back('\t');
+            else outVal.push_back(json[p]);
+            p++;
+        } else if (json[p] == '\"') {
+            break;
+        } else {
+            outVal.push_back(json[p]);
+            p++;
+        }
+    }
+    return true;
+}
+
+static bool FetchUrlDataDynamic(HINTERNET hInternet, const wchar_t* url, std::string& outData, DWORD& outHttpStatus, wchar_t* outErrorMsg, size_t errLen) {
+    outData.clear();
+    outHttpStatus = 0;
+
+    HINTERNET hUrl = InternetOpenUrlW(hInternet, url, NULL, 0,
+                                      INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    if (!hUrl) {
+        DWORD err = GetLastError();
+        if (outErrorMsg) {
+            if (err == ERROR_INTERNET_TIMEOUT) {
+                swprintf_s(outErrorMsg, errLen, L"Сервер не отвечает (таймаут соединения).");
+            } else {
+                swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
+            }
+        }
+        return false;
+    }
+
+    DWORD statusCode = 0;
+    DWORD statusLen = sizeof(statusCode);
+    if (HttpQueryInfoW(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &statusCode, &statusLen, NULL)) {
+        outHttpStatus = statusCode;
+    }
+
+    if (outHttpStatus != 200) {
+        InternetCloseHandle(hUrl);
+        if (outErrorMsg) {
+            if (outHttpStatus == 404) {
+                swprintf_s(outErrorMsg, errLen, L"Релиз не найден на сервере (HTTP 404).");
+            } else if (outHttpStatus == 403 || outHttpStatus == 429) {
+                swprintf_s(outErrorMsg, errLen, L"Превышен лимит запросов к GitHub (rate limit). Подождите 1 час.");
+            } else {
+                swprintf_s(outErrorMsg, errLen, L"Ошибка сервера (HTTP %lu).", outHttpStatus);
+            }
+        }
+        return false;
+    }
+
+    std::vector<char> buffer(65536);
+    DWORD bytesRead = 0;
+    size_t totalBytes = 0;
+    const size_t MAX_JSON_BYTES = 4 * 1024 * 1024; // 4 MB
+
+    while (InternetReadFile(hUrl, buffer.data(), (DWORD)buffer.size(), &bytesRead) && bytesRead > 0) {
+        totalBytes += bytesRead;
+        if (totalBytes > MAX_JSON_BYTES) break;
+        outData.append(buffer.data(), bytesRead);
+    }
+
+    InternetCloseHandle(hUrl);
+    return !outData.empty();
+}
+
+static int ParseReleasesFromJson(const std::string& json, ReleaseItem* items, int maxItems) {
     int count = 0;
-    const char* p = json;
+    size_t p = 0;
 
     while (count < maxItems) {
-        const char* tagPos = strstr(p, "\"tag_name\"");
-        if (!tagPos) break;
+        size_t tagPos = json.find("\"tag_name\"", p);
+        if (tagPos == std::string::npos) break;
 
-        const char* nextTag = strstr(tagPos + 10, "\"tag_name\"");
+        size_t nextRelease = json.find("{\"", tagPos + 10);
+        size_t blockEnd = (nextRelease != std::string::npos) ? nextRelease : json.size();
 
         ReleaseItem item;
         memset(&item, 0, sizeof(item));
 
-        ExtractJsonString(tagPos, nextTag, "tag_name", item.tag, sizeof(item.tag));
-        const char* v = item.tag;
-        if (*v == 'v' || *v == 'V') v++;
-        strcpy_s(item.version, sizeof(item.version), v);
+        std::string rawTag, rawName, rawDate, rawBody;
+        if (ExtractJsonString(json, tagPos, blockEnd, "tag_name", rawTag)) {
+            MultiByteToWideChar(CP_UTF8, 0, rawTag.c_str(), -1, item.tag, 64);
+            const wchar_t* verPart = item.tag;
+            if (*verPart == L'v' || *verPart == L'V') verPart++;
+            wcscpy_s(item.version, verPart);
+        }
 
-        ExtractJsonString(tagPos, nextTag, "name", item.name, sizeof(item.name));
-        ExtractJsonString(tagPos, nextTag, "published_at", item.date, sizeof(item.date));
-        if (strlen(item.date) >= 10) item.date[10] = '\0';
+        if (ExtractJsonString(json, tagPos, blockEnd, "name", rawName)) {
+            MultiByteToWideChar(CP_UTF8, 0, rawName.c_str(), -1, item.name, 128);
+        } else {
+            wcscpy_s(item.name, item.tag);
+        }
 
-        ExtractJsonString(tagPos, nextTag, "body", item.body, sizeof(item.body));
-        ExtractJsonString(tagPos, nextTag, "browser_download_url", item.downloadUrl, sizeof(item.downloadUrl));
+        if (ExtractJsonString(json, tagPos, blockEnd, "published_at", rawDate)) {
+            if (rawDate.size() >= 10) rawDate.resize(10);
+            MultiByteToWideChar(CP_UTF8, 0, rawDate.c_str(), -1, item.date, 32);
+        }
 
-        items[count++] = item;
+        if (ExtractJsonString(json, tagPos, blockEnd, "body", rawBody)) {
+            SafeTruncateUtf8(rawBody, 2048);
+            item.body = rawBody;
+        }
 
-        if (!nextTag) break;
-        p = nextTag;
+        // Find browser_download_url for update.zip in assets
+        size_t assetPos = json.find("\"browser_download_url\"", tagPos);
+        while (assetPos != std::string::npos && assetPos < blockEnd) {
+            std::string url;
+            if (ExtractJsonString(json, assetPos, blockEnd, "browser_download_url", url)) {
+                if (url.find("update.zip") != std::string::npos && url.find(".sha256") == std::string::npos) {
+                    MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, item.downloadUrl, 1024);
+                    break;
+                }
+            }
+            assetPos = json.find("\"browser_download_url\"", assetPos + 22);
+        }
+
+        // Fallback default url if not explicitly listed in assets
+        if (item.downloadUrl[0] == L'\0' && item.tag[0] != L'\0') {
+            swprintf_s(item.downloadUrl, L"https://github.com/itisislom/gtavc-updates/releases/download/%ls/update.zip", item.tag);
+        }
+
+        if (item.version[0] != L'\0' && ValidateSemVer(item.version)) {
+            items[count++] = item;
+        }
+
+        p = blockEnd;
     }
     return count;
 }
 
-static BOOL FetchUrlData(HINTERNET hInternet, const char* url, char* outBuf, DWORD maxLen) {
-    HINTERNET hUrl = InternetOpenUrlA(hInternet, url, "User-Agent: GTAVC-UpdateChecker\r\n", -1,
-                                      INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
-    if (!hUrl) return FALSE;
-
-    DWORD statusCode = 0;
-    DWORD statusLen = sizeof(statusCode);
-    if (HttpQueryInfoA(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &statusCode, &statusLen, NULL)) {
-        if (statusCode != 200) {
-            InternetCloseHandle(hUrl);
-            return FALSE;
+static void AppendEscapedArg(const std::wstring& arg, std::wstring& cmdLine) {
+    if (!cmdLine.empty()) cmdLine.push_back(L' ');
+    cmdLine.push_back(L'\"');
+    for (size_t i = 0; i < arg.size(); i++) {
+        wchar_t c = arg[i];
+        if (c == L'\"') {
+            cmdLine.append(L"\\\"");
+        } else if (c == L'\\') {
+            size_t count = 1;
+            while (i + 1 < arg.size() && arg[i + 1] == L'\\') {
+                count++;
+                i++;
+            }
+            if (i + 1 == arg.size()) {
+                cmdLine.append(count * 2, L'\\');
+            } else if (arg[i + 1] == L'\"') {
+                cmdLine.append(count * 2 + 1, L'\\');
+            } else {
+                cmdLine.append(count, L'\\');
+            }
+        } else {
+            cmdLine.push_back(c);
         }
     }
-
-    DWORD bytesRead = 0;
-    DWORD totalRead = 0;
-    while (InternetReadFile(hUrl, outBuf + totalRead, maxLen - 1 - totalRead, &bytesRead) && bytesRead > 0) {
-        totalRead += bytesRead;
-        if (totalRead >= maxLen - 1) break;
-    }
-    outBuf[totalRead] = '\0';
-
-    InternetCloseHandle(hUrl);
-    return (totalRead > 0);
+    cmdLine.push_back(L'\"');
 }
 
 static void UpdateSelectionView(ManagerContext* ctx) {
     if (ctx->selectedIndex < 0 || ctx->selectedIndex >= ctx->releaseCount) return;
 
     ReleaseItem* item = &ctx->releases[ctx->selectedIndex];
+
+    wchar_t descBuf[3000];
+    wchar_t wBody[2500] = { 0 };
+    MultiByteToWideChar(CP_UTF8, 0, item->body.c_str(), -1, wBody, 2500);
+
+    swprintf_s(descBuf,
+               L"Version: %ls\r\n"
+               L"Release Date: %ls\r\n"
+               L"Title: %ls\r\n\r\n"
+               L"Notes:\r\n%ls",
+               item->tag,
+               item->date[0] ? item->date : L"Recent",
+               item->name,
+               wBody[0] ? wBody : L"No description provided for this release.");
+
+    SetWindowTextW(ctx->hDesc, descBuf);
+
     int cmp = CompareSemanticVersions(item->version, ctx->localVer);
-
-    char descText[3072];
-    sprintf_s(descText, sizeof(descText),
-              "Release:  %s\r\n"
-              "Tag:      %s\r\n"
-              "Date:     %s\r\n"
-              "Status:   %s\r\n"
-              "--------------------------------------------------\r\n"
-              "%s",
-              item->name, item->tag, item->date,
-              (cmp > 0 ? "New Update Available" : (cmp == 0 ? "Currently Installed" : "Older Version (Rollback Available)")),
-              item->body[0] ? item->body : "(No changelog description provided)");
-
-    SetWindowTextA(ctx->hDesc, descText);
-
-    char btnText[64];
+    wchar_t btnText[64];
     if (cmp > 0) {
-        sprintf_s(btnText, sizeof(btnText), "Install %s", item->tag);
-        EnableWindow(ctx->hBtnInstall, TRUE);
+        swprintf_s(btnText, L"Установить %ls", item->tag);
     } else if (cmp < 0) {
-        sprintf_s(btnText, sizeof(btnText), "Rollback to %s", item->tag);
-        EnableWindow(ctx->hBtnInstall, TRUE);
+        swprintf_s(btnText, L"Откатиться на %ls", item->tag);
     } else {
-        sprintf_s(btnText, sizeof(btnText), "Reinstall %s", item->tag);
-        EnableWindow(ctx->hBtnInstall, TRUE);
+        swprintf_s(btnText, L"Переустановить %ls", item->tag);
     }
-    SetWindowTextA(ctx->hBtnInstall, btnText);
+    SetWindowTextW(ctx->hBtnInstall, btnText);
+    EnableWindow(ctx->hBtnInstall, TRUE);
 }
 
 static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -240,68 +383,63 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
     switch (msg) {
         case WM_CREATE: {
-            CREATESTRUCT* cs = (CREATESTRUCT*)lParam;
+            CREATESTRUCTW* cs = (CREATESTRUCTW*)lParam;
             ctx = (ManagerContext*)cs->lpCreateParams;
             SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)ctx);
 
             HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
 
-            // Header info
-            char headerBuf[256];
-            sprintf_s(headerBuf, sizeof(headerBuf),
-                      "Current Installed: v%s    |    Latest on GitHub: %s",
-                      ctx->localVer,
-                      ctx->releaseCount > 0 ? ctx->releases[0].tag : "Unknown");
+            wchar_t headerBuf[256];
+            swprintf_s(headerBuf,
+                       L"Текущая установленная: v%ls    |    Последняя на GitHub: %ls",
+                       ctx->localVer,
+                       ctx->releaseCount > 0 ? ctx->releases[0].tag : L"Неизвестно");
 
-            ctx->hHeader = CreateWindowExA(0, "STATIC", headerBuf,
+            ctx->hHeader = CreateWindowExW(0, L"STATIC", headerBuf,
                                            WS_CHILD | WS_VISIBLE | SS_LEFT,
                                            20, 15, 520, 20, hWnd, NULL, cs->hInstance, NULL);
             SendMessage(ctx->hHeader, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            // Left: Releases label & Listbox
-            HWND hLblList = CreateWindowExA(0, "STATIC", "Available Releases (Latest 5):",
+            HWND hLblList = CreateWindowExW(0, L"STATIC", L"Доступные версии (последние 5):",
                                             WS_CHILD | WS_VISIBLE | SS_LEFT,
-                                            20, 42, 200, 18, hWnd, NULL, cs->hInstance, NULL);
+                                            20, 42, 210, 18, hWnd, NULL, cs->hInstance, NULL);
             SendMessage(hLblList, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            ctx->hList = CreateWindowExA(WS_EX_CLIENTEDGE, "LISTBOX", NULL,
+            ctx->hList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
                                          WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | LBS_NOTIFY,
                                          20, 62, 210, 270, hWnd, (HMENU)IDC_LIST_RELEASES, cs->hInstance, NULL);
             SendMessage(ctx->hList, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            // Populate Listbox
             for (int i = 0; i < ctx->releaseCount; i++) {
                 int cmp = CompareSemanticVersions(ctx->releases[i].version, ctx->localVer);
-                char lineBuf[128];
+                wchar_t lineBuf[128];
                 if (cmp > 0) {
-                    sprintf_s(lineBuf, sizeof(lineBuf), "%s  [New]", ctx->releases[i].tag);
+                    swprintf_s(lineBuf, L"%ls  [Новая]", ctx->releases[i].tag);
                 } else if (cmp == 0) {
-                    sprintf_s(lineBuf, sizeof(lineBuf), "%s  [Installed]", ctx->releases[i].tag);
+                    swprintf_s(lineBuf, L"%ls  [Текущая]", ctx->releases[i].tag);
                 } else {
-                    sprintf_s(lineBuf, sizeof(lineBuf), "%s  [Rollback]", ctx->releases[i].tag);
+                    swprintf_s(lineBuf, L"%ls  [Откат]", ctx->releases[i].tag);
                 }
-                SendMessageA(ctx->hList, LB_ADDSTRING, 0, (LPARAM)lineBuf);
+                SendMessageW(ctx->hList, LB_ADDSTRING, 0, (LPARAM)lineBuf);
             }
             SendMessage(ctx->hList, LB_SETCURSEL, ctx->selectedIndex, 0);
 
-            // Right: Description label & Edit control
-            HWND hLblDesc = CreateWindowExA(0, "STATIC", "Release Notes & Details:",
+            HWND hLblDesc = CreateWindowExW(0, L"STATIC", L"Описание и список изменений:",
                                             WS_CHILD | WS_VISIBLE | SS_LEFT,
                                             245, 42, 300, 18, hWnd, NULL, cs->hInstance, NULL);
             SendMessage(hLblDesc, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            ctx->hDesc = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", "",
+            ctx->hDesc = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
                                          WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
                                          245, 62, 300, 270, hWnd, (HMENU)IDC_EDIT_DESC, cs->hInstance, NULL);
             SendMessage(ctx->hDesc, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            // Bottom Buttons
-            ctx->hBtnInstall = CreateWindowExA(0, "BUTTON", "Install Selected",
+            ctx->hBtnInstall = CreateWindowExW(0, L"BUTTON", L"Установить",
                                                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
                                                245, 345, 160, 32, hWnd, (HMENU)IDC_BTN_INSTALL, cs->hInstance, NULL);
             SendMessage(ctx->hBtnInstall, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            HWND hBtnPlay = CreateWindowExA(0, "BUTTON", "Play / Close",
+            HWND hBtnPlay = CreateWindowExW(0, L"BUTTON", L"Играть / Закрыть",
                                             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
                                             415, 345, 130, 32, hWnd, (HMENU)IDC_BTN_PLAY, cs->hInstance, NULL);
             SendMessage(hBtnPlay, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -335,38 +473,82 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                 ReleaseItem* item = &ctx->releases[ctx->selectedIndex];
                 int cmp = CompareSemanticVersions(item->version, ctx->localVer);
 
-                char confirmMsg[512];
+                wchar_t confirmMsg[512];
                 if (cmp > 0) {
-                    sprintf_s(confirmMsg, sizeof(confirmMsg),
-                              "Install update to %s?\n\n"
-                              "The game will close to apply the update.", item->tag);
+                    swprintf_s(confirmMsg,
+                               L"Установить обновление до %ls?\n\n"
+                               L"Игра будет закрыта для применения обновления.", item->tag);
                 } else if (cmp < 0) {
-                    sprintf_s(confirmMsg, sizeof(confirmMsg),
-                              "Roll back to older version %s?\n\n"
-                              "Files introduced in newer versions will be cleanly removed and the game will close.", item->tag);
+                    swprintf_s(confirmMsg,
+                               L"Откатиться на предыдущую версию %ls?\n\n"
+                               L"Новые файлы будут удалены, а сохранённые бэкапы восстановлены. Игра будет закрыта.", item->tag);
                 } else {
-                    sprintf_s(confirmMsg, sizeof(confirmMsg),
-                              "Reinstall version %s?\n\n"
-                              "The game will close to reinstall files.", item->tag);
+                    swprintf_s(confirmMsg,
+                               L"Переустановить версию %ls?\n\n"
+                               L"Игра будет закрыта для повторной установки файлов.", item->tag);
                 }
 
-                int res = MessageBoxA(hWnd, confirmMsg, "Confirm Version Switch",
+                int res = MessageBoxW(hWnd, confirmMsg, L"Подтверждение обновления",
                                       MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND);
                 if (res == IDYES) {
-                    char updaterPath[MAX_PATH];
-                    sprintf_s(updaterPath, "%s\\updater.exe", ctx->gameDir);
+                    wchar_t updaterPath[MAX_PATH];
+                    swprintf_s(updaterPath, L"%s\\updater.exe", ctx->gameDir);
 
-                    char cmdLine[2048];
-                    sprintf_s(cmdLine, "\"%s\" \"%s\" \"%s\" %lu --no-restart",
-                              updaterPath, item->downloadUrl, item->version, GetCurrentProcessId());
+                    // Validate URL and version before executing updater
+                    if (!ValidateUrl(item->downloadUrl) || !ValidateSemVer(item->version)) {
+                        MessageBoxW(hWnd, L"Ошибка безопасности: некорректный URL или формат версии релиза.",
+                                    L"Ошибка", MB_ICONERROR | MB_OK);
+                        return 0;
+                    }
 
-                    STARTUPINFOA si = { sizeof(si) };
+                    // Build escaped command line
+                    std::wstring cmdLine;
+                    AppendEscapedArg(updaterPath, cmdLine);
+                    AppendEscapedArg(item->downloadUrl, cmdLine);
+                    AppendEscapedArg(item->version, cmdLine);
+                    AppendEscapedArg(std::to_wstring(GetCurrentProcessId()), cmdLine);
+                    AppendEscapedArg(L"--no-restart", cmdLine);
+
+                    std::vector<wchar_t> cmdLineBuf(cmdLine.begin(), cmdLine.end());
+                    cmdLineBuf.push_back(L'\0');
+
+                    STARTUPINFOW si = { sizeof(si) };
                     PROCESS_INFORMATION pi;
-                    if (CreateProcessA(NULL, cmdLine, NULL, NULL, FALSE, 0, NULL, ctx->gameDir, &si, &pi)) {
+                    if (CreateProcessW(NULL, cmdLineBuf.data(), NULL, NULL, FALSE, 0, NULL, ctx->gameDir, &si, &pi)) {
                         CloseHandle(pi.hProcess);
                         CloseHandle(pi.hThread);
                     }
-                    ExitProcess(0);
+
+                    // Graceful game exit instead of ExitProcess(0)
+                    DestroyWindow(hWnd);
+
+                    HWND hGame = ctx->hParent;
+                    if (hGame && IsWindow(hGame)) {
+                        PostMessage(hGame, WM_CLOSE, 0, 0);
+
+                        ULONGLONG startTick = GetTickCount64();
+                        BOOL closed = FALSE;
+                        while (GetTickCount64() - startTick < 3000) {
+                            if (!IsWindow(hGame)) {
+                                closed = TRUE;
+                                break;
+                            }
+                            Sleep(100);
+                        }
+
+                        if (!closed && IsWindow(hGame)) {
+                            int ans = MessageBoxW(NULL,
+                                L"Пожалуйста, сохраните игру и закройте её для продолжения обновления.\n\n"
+                                L"Нажмите ОК для выхода из игры прямо сейчас.",
+                                L"GTA: Vice City - Закрытие игры",
+                                MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND);
+                            if (ans == IDOK) {
+                                ExitProcess(0);
+                            }
+                        }
+                    } else {
+                        ExitProcess(0);
+                    }
                 }
                 return 0;
             }
@@ -381,17 +563,17 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
             PostQuitMessage(0);
             return 0;
     }
-    return DefWindowProcA(hWnd, msg, wParam, lParam);
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
 static void ShowUpdateManagerDialog(ManagerContext* ctx) {
-    WNDCLASSA wc = { 0 };
+    WNDCLASSW wc = { 0 };
     wc.lpfnWndProc = ManagerWndProc;
     wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = "GTAVC_UpdateManagerDialog";
+    wc.lpszClassName = L"GTAVC_UpdateManagerDialog";
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    RegisterClassA(&wc);
+    RegisterClassW(&wc);
 
     HWND hParent = ctx->hParent;
     if (hParent && IsWindow(hParent)) {
@@ -405,8 +587,8 @@ static void ShowUpdateManagerDialog(ManagerContext* ctx) {
     int posX = (scrW - winW) / 2;
     int posY = (scrH - winH) / 2;
 
-    HWND hDlg = CreateWindowExA(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME,
-                                "GTAVC_UpdateManagerDialog", "GTA: Vice City - Update Manager",
+    HWND hDlg = CreateWindowExW(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME,
+                                L"GTAVC_UpdateManagerDialog", L"GTA: Vice City - Менеджер обновлений",
                                 WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
                                 posX, posY, winW, winH,
                                 hParent, NULL, wc.hInstance, ctx);
@@ -414,10 +596,10 @@ static void ShowUpdateManagerDialog(ManagerContext* ctx) {
     SetForegroundWindow(hDlg);
 
     MSG msg;
-    while (GetMessageA(&msg, NULL, 0, 0)) {
+    while (GetMessageW(&msg, NULL, 0, 0)) {
         if (!IsDialogMessage(hDlg, &msg)) {
             TranslateMessage(&msg);
-            DispatchMessageA(&msg);
+            DispatchMessageW(&msg);
         }
     }
 
@@ -428,26 +610,25 @@ static void ShowUpdateManagerDialog(ManagerContext* ctx) {
     }
 }
 
-// Startup one-time info dialog
 static LRESULT CALLBACK InfoDialogWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_CREATE: {
-            CREATESTRUCT* cs = (CREATESTRUCT*)lParam;
+            CREATESTRUCTW* cs = (CREATESTRUCTW*)lParam;
             HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
 
-            const char* infoText =
-                "GTA: Vice City - Update System\n"
-                "Created by Islom Sadriddinov\n\n"
-                "- Press '0' during gameplay at any time to open Update Manager.\n"
-                "- You have full freedom of choice: install new updates or roll back.\n"
-                "- Updates are downloaded and applied automatically from GitHub.";
+            const wchar_t* infoText =
+                L"GTA: Vice City - Система обновлений\n"
+                L"Разработчик: Ислом Садриддинов\n\n"
+                L"- Нажмите '0' во время игры в любой момент для открытия Менеджера обновлений.\n"
+                L"- У вас есть полная свобода выбора: установка обновлений, переустановка или откат.\n"
+                L"- Все обновления загружаются безопасно из официального репозитория GitHub.";
 
-            HWND hText = CreateWindowExA(0, "STATIC", infoText,
+            HWND hText = CreateWindowExW(0, L"STATIC", infoText,
                                          WS_CHILD | WS_VISIBLE | SS_LEFT,
                                          30, 20, 390, 105, hWnd, NULL, cs->hInstance, NULL);
             SendMessage(hText, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            HWND hBtnOk = CreateWindowExA(0, "BUTTON", "OK",
+            HWND hBtnOk = CreateWindowExW(0, L"BUTTON", L"OK",
                                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
                                           160, 135, 120, 32, hWnd, (HMENU)IDOK, cs->hInstance, NULL);
             SendMessage(hBtnOk, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -471,17 +652,17 @@ static LRESULT CALLBACK InfoDialogWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
             PostQuitMessage(0);
             return 0;
     }
-    return DefWindowProcA(hWnd, msg, wParam, lParam);
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
 static void ShowUpdaterInfoDialog(HWND hParent) {
-    WNDCLASSA wc = { 0 };
+    WNDCLASSW wc = { 0 };
     wc.lpfnWndProc = InfoDialogWndProc;
     wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = "GTAVC_UpdaterInfoDialog";
+    wc.lpszClassName = L"GTAVC_UpdaterInfoDialog";
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    RegisterClassA(&wc);
+    RegisterClassW(&wc);
 
     if (hParent && IsWindow(hParent)) {
         EnableWindow(hParent, FALSE);
@@ -494,8 +675,8 @@ static void ShowUpdaterInfoDialog(HWND hParent) {
     int posX = (scrW - winW) / 2;
     int posY = (scrH - winH) / 2;
 
-    HWND hDlg = CreateWindowExA(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME,
-                                "GTAVC_UpdaterInfoDialog", "GTA: Vice City - Updater Info",
+    HWND hDlg = CreateWindowExW(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME,
+                                L"GTAVC_UpdaterInfoDialog", L"GTA: Vice City - Обновления",
                                 WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
                                 posX, posY, winW, winH,
                                 hParent, NULL, wc.hInstance, NULL);
@@ -503,10 +684,10 @@ static void ShowUpdaterInfoDialog(HWND hParent) {
     SetForegroundWindow(hDlg);
 
     MSG msg;
-    while (GetMessageA(&msg, NULL, 0, 0)) {
+    while (GetMessageW(&msg, NULL, 0, 0)) {
         if (!IsDialogMessage(hDlg, &msg)) {
             TranslateMessage(&msg);
-            DispatchMessageA(&msg);
+            DispatchMessageW(&msg);
         }
     }
 
@@ -517,29 +698,40 @@ static void ShowUpdaterInfoDialog(HWND hParent) {
     }
 }
 
-static int FetchReleaseList(ReleaseItem* items, int maxItems) {
-    HINTERNET hInternet = InternetOpenA("GTAVC-UpdateChecker", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
-    if (!hInternet) return 0;
+static int FetchReleaseList(ReleaseItem* items, int maxItems, wchar_t* outErrorMsg, size_t errLen) {
+    HINTERNET hInternet = InternetOpenW(L"GTAVC-UpdateChecker", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!hInternet) {
+        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
+        return 0;
+    }
 
-    char jsonBuf[32768] = {0};
+    std::string jsonBuf;
+    DWORD httpStatus = 0;
     int count = 0;
 
     // 1. Query GitHub API for 5 releases
-    if (FetchUrlData(hInternet, GITHUB_RELEASES_API, jsonBuf, sizeof(jsonBuf))) {
+    if (FetchUrlDataDynamic(hInternet, GITHUB_RELEASES_API, jsonBuf, httpStatus, outErrorMsg, errLen)) {
         count = ParseReleasesFromJson(jsonBuf, items, maxItems);
     }
 
     // 2. Fallback to raw manifest if API fails
     if (count == 0) {
-        if (FetchUrlData(hInternet, GITHUB_RAW_MANIFEST, jsonBuf, sizeof(jsonBuf))) {
+        if (FetchUrlDataDynamic(hInternet, GITHUB_RAW_MANIFEST, jsonBuf, httpStatus, nullptr, 0)) {
             ReleaseItem single;
             memset(&single, 0, sizeof(single));
-            ExtractJsonString(jsonBuf, NULL, "version", single.version, sizeof(single.version));
-            sprintf_s(single.tag, sizeof(single.tag), "v%s", single.version);
-            ExtractJsonString(jsonBuf, NULL, "download_url", single.downloadUrl, sizeof(single.downloadUrl));
-            strcpy_s(single.name, sizeof(single.name), "Release from raw manifest");
-            strcpy_s(single.body, sizeof(single.body), "Latest published update.");
-            items[count++] = single;
+            std::string verStr, dlStr;
+            if (ExtractJsonString(jsonBuf, 0, std::string::npos, "version", verStr)) {
+                MultiByteToWideChar(CP_UTF8, 0, verStr.c_str(), -1, single.version, 64);
+                swprintf_s(single.tag, L"v%ls", single.version);
+            }
+            if (ExtractJsonString(jsonBuf, 0, std::string::npos, "download_url", dlStr)) {
+                MultiByteToWideChar(CP_UTF8, 0, dlStr.c_str(), -1, single.downloadUrl, 1024);
+            }
+            wcscpy_s(single.name, L"Релиз из version.json");
+            single.body = "Последняя опубликованная версия из манифеста.";
+            if (single.version[0] != L'\0' && ValidateSemVer(single.version)) {
+                items[count++] = single;
+            }
         }
     }
 
@@ -548,88 +740,135 @@ static int FetchReleaseList(ReleaseItem* items, int maxItems) {
 }
 
 static void OpenUpdateManager(HWND hGameWnd, BOOL showAlways) {
-    ManagerContext ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    GetGameDir(ctx.gameDir, sizeof(ctx.gameDir));
-    ReadLocalVersion(ctx.gameDir, ctx.localVer, sizeof(ctx.localVer));
-    ctx.hParent = hGameWnd;
+    wchar_t gameDir[MAX_PATH];
+    GetGameDirW(gameDir, MAX_PATH);
 
-    ctx.releaseCount = FetchReleaseList(ctx.releases, 5);
-    ctx.selectedIndex = 0;
+    wchar_t iniPath[MAX_PATH];
+    GetUpdaterIniPath(gameDir, iniPath, MAX_PATH);
 
-    if (ctx.releaseCount == 0) {
+    if (!showAlways && !HasShownUpdaterInfo(iniPath)) {
+        ShowUpdaterInfoDialog(hGameWnd);
+        MarkUpdaterInfoShown(iniPath);
+    }
+
+    std::unique_ptr<ManagerContext> ctx = std::make_unique<ManagerContext>();
+    wcscpy_s(ctx->gameDir, gameDir);
+    ctx->hParent = hGameWnd;
+    ReadLocalVersionW(gameDir, ctx->localVer, 64);
+
+    wchar_t netErrMsg[512] = { 0 };
+    ctx->releaseCount = FetchReleaseList(ctx->releases, 10, netErrMsg, 512);
+
+    if (ctx->releaseCount == 0) {
         if (showAlways) {
-            MessageBoxW(hGameWnd, L"Нет интернета для обновления.", L"GTA: Vice City - Update Manager", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+            MessageBoxW(hGameWnd,
+                        netErrMsg[0] ? netErrMsg : L"Нет интернета для обновления.",
+                        L"GTA: Vice City - Обновление",
+                        MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
         }
         return;
     }
 
-    // Check if newest release > localVer
-    BOOL hasNewer = (CompareSemanticVersions(ctx.releases[0].version, ctx.localVer) > 0);
-
-    // If triggered by key '0' -> showAlways is TRUE (always show)
-    // If triggered on startup -> only show if hasNewer is TRUE
-    if (showAlways || hasNewer) {
-        ShowUpdateManagerDialog(&ctx);
-    }
+    // Auto-select first item
+    ctx->selectedIndex = 0;
+    ShowUpdateManagerDialog(ctx.get());
 }
 
-static DWORD WINAPI MonitorKeysThread(LPVOID lpParam) {
-    Sleep(2500);
+static HWND FindGameWindowByPid(DWORD targetPid) {
+    struct SearchCtx {
+        DWORD pid;
+        HWND hWndResult;
+    } sCtx = { targetPid, NULL };
 
-    HWND hGameWnd = FindWindowA("Grand Theft Auto", NULL);
-    if (!hGameWnd) hGameWnd = GetActiveWindow();
+    EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
+        SearchCtx* c = (SearchCtx*)lParam;
+        DWORD wndPid = 0;
+        GetWindowThreadProcessId(hwnd, &wndPid);
+        if (wndPid == c->pid && IsWindowVisible(hwnd)) {
+            wchar_t clsName[128];
+            GetClassNameW(hwnd, clsName, 128);
+            if (wcscmp(clsName, L"Grand Theft Auto") == 0 || wcscmp(clsName, L"GTAVC") == 0) {
+                c->hWndResult = hwnd;
+                return FALSE;
+            }
+            if (!c->hWndResult) c->hWndResult = hwnd;
+        }
+        return TRUE;
+    }, (LPARAM)&sCtx);
 
-    char gameDir[MAX_PATH];
-    GetGameDir(gameDir, sizeof(gameDir));
+    return sCtx.hWndResult;
+}
 
-    // 1. One-time Startup Info Dialog (only once ever across all relaunches)
-    if (!HasShownUpdaterInfo(gameDir)) {
-        Log("Showing one-time Updater Info dialog...");
-        ShowUpdaterInfoDialog(hGameWnd);
-        MarkUpdaterInfoShown(gameDir);
+static DWORD WINAPI CheckerThread(LPVOID lpParam) {
+    (void)lpParam;
+    Sleep(2000);
+
+    DWORD myPid = GetCurrentProcessId();
+    HWND hGameWnd = NULL;
+    for (int i = 0; i < 30; i++) {
+        hGameWnd = FindGameWindowByPid(myPid);
+        if (hGameWnd) break;
+        Sleep(500);
     }
 
-    // 2. On startup: if a newer version is available, show the Update Manager dialog
-    // (with complete freedom of choice: "Play / Close" or "Install")
+    wchar_t gameDir[MAX_PATH];
+    GetGameDirW(gameDir, MAX_PATH);
+
+    wchar_t iniPath[MAX_PATH];
+    GetUpdaterIniPath(gameDir, iniPath, MAX_PATH);
+
+    // Initial silent check / startup info dialog
     OpenUpdateManager(hGameWnd, FALSE);
 
-    Log("MonitorKeysThread active: listening for key '0'...");
-
-    // 3. Continuous listener for key '0'
-    BOOL wasDown = FALSE;
-    while (TRUE) {
+    ULONGLONG lastTriggerTick = 0;
+    while (true) {
         Sleep(50);
 
-        HWND fg = GetForegroundWindow();
-        if (fg == hGameWnd || hGameWnd == NULL) {
-            BOOL isDown = ((GetAsyncKeyState('0') & 0x8000) != 0) ||
-                          ((GetAsyncKeyState(VK_NUMPAD0) & 0x8000) != 0);
+        int targetVk = GetConfiguredHotkey(iniPath);
+        bool keyPressed = (GetAsyncKeyState(targetVk) & 0x8000) != 0;
+        if (targetVk == '0') {
+            keyPressed = keyPressed || ((GetAsyncKeyState(VK_NUMPAD0) & 0x8000) != 0);
+        }
 
-            if (isDown && !wasDown) {
-                wasDown = TRUE;
-                Log("Key '0' pressed. Opening Update Manager dialog...");
-                OpenUpdateManager(fg, TRUE);
-            } else if (!isDown) {
-                wasDown = FALSE;
+        if (keyPressed) {
+            ULONGLONG now = GetTickCount64();
+            if (now - lastTriggerTick >= 300) { // 300 ms debounce
+                lastTriggerTick = now;
+                HWND hFore = GetForegroundWindow();
+                if (hFore == hGameWnd || (hGameWnd == NULL && hFore != NULL)) {
+                    OpenUpdateManager(hGameWnd, TRUE);
+                }
             }
         }
     }
-    return 0;
 }
 
-#ifdef STANDALONE_TEST
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    OpenUpdateManager(NULL, TRUE);
-    return 0;
-}
-#else
-BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
-    if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
-        DisableThreadLibraryCalls(hModule);
-        Log("UpdateChecker.asi attached. Starting monitor thread...");
-        CreateThread(NULL, 0, MonitorKeysThread, NULL, 0, NULL);
+static HANDLE g_hSingletonMutex = NULL;
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
+    (void)lpvReserved;
+    if (fdwReason == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(hinstDLL);
+
+        DWORD pid = GetCurrentProcessId();
+        wchar_t mutexName[64];
+        swprintf_s(mutexName, L"Local\\GTAVC_UpdateChecker_%lu", pid);
+
+        g_hSingletonMutex = CreateMutexW(NULL, TRUE, mutexName);
+        if (g_hSingletonMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
+            if (g_hSingletonMutex) {
+                CloseHandle(g_hSingletonMutex);
+                g_hSingletonMutex = NULL;
+            }
+            return TRUE;
+        }
+
+        CreateThread(NULL, 0, CheckerThread, NULL, 0, NULL);
+    } else if (fdwReason == DLL_PROCESS_DETACH) {
+        if (g_hSingletonMutex) {
+            CloseHandle(g_hSingletonMutex);
+            g_hSingletonMutex = NULL;
+        }
     }
     return TRUE;
 }
-#endif
