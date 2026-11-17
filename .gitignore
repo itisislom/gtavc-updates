@@ -1,0 +1,11 @@
+build/
+*.obj
+*.pdb
+*.ilk
+*.log
+*.key
+*.pem
+updater.ini
+installed_manifest.txt
+.updaterbackups/
+tests/sandbox/
