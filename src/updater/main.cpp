@@ -620,14 +620,14 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     }
 
     if (params.newVersion[0] == L'\0') {
-        wcscpy_s(params.newVersion, L"1.0.3");
+        wcscpy_s(params.newVersion, L"1.0.5");
     }
     if (params.downloadUrl[0] == L'\0'
 #ifdef TESTHOOKS
         && params.localZip[0] == L'\0'
 #endif
     ) {
-        wcscpy_s(params.downloadUrl, L"https://github.com/itisislom/gtavc-updates/releases/download/v1.0.3/update.zip");
+        wcscpy_s(params.downloadUrl, L"https://github.com/itisislom/gtavc-updates/releases/download/v1.0.5/update.zip");
     }
     if (argvW) LocalFree(argvW);
 

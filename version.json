@@ -1,7 +1,7 @@
 {
-  "version": "1.0.4",
-  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.0.4/update.zip",
-  "message": "Vice City Multiplayer Co-Op Update (SA-MP Chat, 3D Bubbles, Nicknames, RC Helicopter Crashfix)",
+  "version": "1.0.5",
+  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.0.5/update.zip",
+  "message": "Vice City Story Co-Op (VCCoop v2026.10.07): Full Story Campaign Missions Co-Op, Cutscenes & Markers Sync",
   "mandatory": true,
-  "sha256": "12fb5c848f47bd19e65c6ef3c2fd9202ad92ae4ae9631154216e724781619596"
+  "sha256": "1e6a03f711a845d86110b9c9f70e0248c425aabfefaf84e826f39bc7c89523ec"
 }
