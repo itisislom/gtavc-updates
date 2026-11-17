@@ -204,13 +204,148 @@ static void NormalizePath(char* p) {
 
 static BOOL IsProtectedGameDirectory(const char* relPath) {
     static const char* protectedDirs[] = {
-        "", ".", "scripts", "modloader", "cleo", "data", "models",
+        "", ".", ".updaterbackups", "scripts", "modloader", "cleo", "data", "models",
         "txd", "audio", "anim", "movies", "text", "_tools"
     };
     for (size_t i = 0; i < sizeof(protectedDirs) / sizeof(protectedDirs[0]); i++) {
         if (_stricmp(relPath, protectedDirs[i]) == 0) return TRUE;
     }
     return FALSE;
+}
+
+static void EnsureDirectoryExists(const char* filePath) {
+    char dir[MAX_PATH];
+    strcpy_s(dir, filePath);
+    char* lastSlash = strrchr(dir, '\\');
+    if (!lastSlash) return;
+    *lastSlash = '\0';
+
+    for (char* p = dir; *p; p++) {
+        if (*p == '\\') {
+            *p = '\0';
+            CreateDirectoryA(dir, NULL);
+            *p = '\\';
+        }
+    }
+    CreateDirectoryA(dir, NULL);
+}
+
+static void BackupItemRecursive(const char* srcPath, const char* dstPath) {
+    DWORD attrs = GetFileAttributesA(srcPath);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return;
+
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+        CreateDirectoryA(dstPath, NULL);
+        char searchPath[MAX_PATH];
+        sprintf_s(searchPath, "%s\\*.*", srcPath);
+        WIN32_FIND_DATAA fd;
+        HANDLE hFind = FindFirstFileA(searchPath, &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if (strcmp(fd.cFileName, ".") != 0 && strcmp(fd.cFileName, "..") != 0) {
+                    char subSrc[MAX_PATH];
+                    char subDst[MAX_PATH];
+                    sprintf_s(subSrc, "%s\\%s", srcPath, fd.cFileName);
+                    sprintf_s(subDst, "%s\\%s", dstPath, fd.cFileName);
+                    BackupItemRecursive(subSrc, subDst);
+                }
+            } while (FindNextFileA(hFind, &fd));
+            FindClose(hFind);
+        }
+    } else {
+        EnsureDirectoryExists(dstPath);
+        CopyFileA(srcPath, dstPath, FALSE);
+    }
+}
+
+static void BackupDeletedItem(const char* gameDir, const char* relPath) {
+    char srcPath[MAX_PATH];
+    sprintf_s(srcPath, "%s\\%s", gameDir, relPath);
+
+    DWORD attrs = GetFileAttributesA(srcPath);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return;
+
+    char dstPath[MAX_PATH];
+    sprintf_s(dstPath, "%s\\.updaterbackups\\%s", gameDir, relPath);
+
+    BackupItemRecursive(srcPath, dstPath);
+}
+
+static void RestoreBackupsRecursive(const char* currentDir, const char* backupRoot, const char* gameDir) {
+    char searchPath[MAX_PATH];
+    sprintf_s(searchPath, "%s\\*.*", currentDir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(searchPath, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+
+        char fullSrc[MAX_PATH];
+        sprintf_s(fullSrc, "%s\\%s", currentDir, fd.cFileName);
+
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            RestoreBackupsRecursive(fullSrc, backupRoot, gameDir);
+            RemoveDirectoryA(fullSrc);
+        } else {
+            const char* relPath = fullSrc + strlen(backupRoot);
+            while (*relPath == '\\' || *relPath == '/') relPath++;
+
+            char fullDst[MAX_PATH];
+            sprintf_s(fullDst, "%s\\%s", gameDir, relPath);
+
+            EnsureDirectoryExists(fullDst);
+            CopyFileA(fullSrc, fullDst, FALSE);
+            DeleteFileA(fullSrc);
+        }
+    } while (FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+    RemoveDirectoryA(currentDir);
+}
+
+static void RestoreAllBackups(const char* gameDir) {
+    char backupDir[MAX_PATH];
+    sprintf_s(backupDir, "%s\\.updaterbackups", gameDir);
+    DWORD attrs = GetFileAttributesA(backupDir);
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        RestoreBackupsRecursive(backupDir, backupDir, gameDir);
+    }
+}
+
+static int CompareSemanticVersions(const char* v1, const char* v2) {
+    int a1 = 0, a2 = 0, a3 = 0;
+    int b1 = 0, b2 = 0, b3 = 0;
+
+    const char* p1 = v1;
+    if (*p1 == 'v' || *p1 == 'V') p1++;
+    const char* p2 = v2;
+    if (*p2 == 'v' || *p2 == 'V') p2++;
+
+    sscanf_s(p1, "%d.%d.%d", &a1, &a2, &a3);
+    sscanf_s(p2, "%d.%d.%d", &b1, &b2, &b3);
+
+    if (a1 > b1) return 1;
+    if (a1 < b1) return -1;
+    if (a2 > b2) return 1;
+    if (a2 < b2) return -1;
+    if (a3 > b3) return 1;
+    if (a3 < b3) return -1;
+    return 0;
+}
+
+static void ReadCurrentVersion(const char* gameDir, char* outVer, size_t maxLen) {
+    char path[MAX_PATH];
+    sprintf_s(path, "%s\\version.txt", gameDir);
+    FILE* f = fopen(path, "r");
+    if (f) {
+        if (fgets(outVer, (int)maxLen, f)) {
+            char* nl = strpbrk(outVer, "\r\n");
+            if (nl) *nl = '\0';
+        }
+        fclose(f);
+    } else {
+        strcpy_s(outVer, maxLen, "0.0.0");
+    }
 }
 
 static void ProcessDeletions(const char* gameDir) {
@@ -227,6 +362,8 @@ static void ProcessDeletions(const char* gameDir) {
         while (*p == ' ' || *p == '\t') p++;
         NormalizePath(p);
         if (p[0] == '\0' || p[0] == '#' || IsProtectedGameDirectory(p)) continue;
+
+        BackupDeletedItem(gameDir, p);
 
         char targetPath[MAX_PATH];
         sprintf_s(targetPath, "%s\\%s", gameDir, p);
@@ -355,6 +492,10 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         return 1;
     }
 
+    char currentVer[64] = {0};
+    ReadCurrentVersion(gameDir, currentVer, sizeof(currentVer));
+    BOOL isRollback = (CompareSemanticVersions(p->newVersion, currentVer) < 0);
+
     SetProgress(80);
     SetStatus("Preparing update files...");
 
@@ -389,7 +530,12 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
 
     DeleteFileA(tempZip);
 
-    // 3. Process delete.txt if provided in package
+    // 3. If rolling back: restore any previously deleted files from .updaterbackups
+    if (isRollback) {
+        RestoreAllBackups(gameDir);
+    }
+
+    // 4. Process delete.txt if provided in package (creates backups into .updaterbackups)
     ProcessDeletions(gameDir);
 
     // 4. Save incoming manifest as installed manifest
