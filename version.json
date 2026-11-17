@@ -2,5 +2,6 @@
   "version": "1.0.3",
   "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.0.3/update.zip",
   "message": "New Update Files From Islom Sadriddinov (RC Helicopter Fix)",
-  "mandatory": true
+  "mandatory": true,
+  "sha256": "3a0a057a0fd09a3458559ba9e94676d7530d8e36fd92c9f6b2445dec75a03976"
 }
