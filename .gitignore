@@ -1,4 +1,5 @@
 build/
+dist/
 *.obj
 *.pdb
 *.ilk
@@ -9,3 +10,10 @@ updater.ini
 installed_manifest.txt
 .updaterbackups/
 tests/sandbox/
+updater.exe
+updater.exe.old
+UpdateChecker.asi
+scripts/*.asi
+*.exe
+*.asi
+*.dll

@@ -1,46 +1,90 @@
 # GTA: Vice City - In-Game Update Manager
 
-Created by **Islom Sadriddinov**
+Разработчик: **Ислом Садриддинов (Islom Sadriddinov)**  
+Лицензия: **MIT**  
+Платформа: **Windows x86 (Win32 API, /MT, без внешних зависимостей)**
 
-An in-game update management system for GTA: Vice City with GUI dialogs, GitHub Releases integration, freedom of choice (no forced updates), and automated rollback support.
-
----
-
-## Features
-
-- **In-Game Version Manager:** Press `0` (or Numpad `0`) at any time during gameplay to open the Update Manager.
-- **Freedom of Choice:** Lists the 5 most recent GitHub releases. You can install an update, reinstall the current version, or roll back to an older version. Or simply click **Play / Close** to continue playing.
-- **Automatic Clean Rollback:** When downgrading/rolling back to an older version, any files that were introduced in newer releases are automatically and cleanly removed, keeping the game directory clean.
-- **One-Time Intro:** First-launch dialog introduces the player to the update system once, guarded by `updater.ini`.
-- **Zero Dependencies:** Pure Win32 API and native Windows HTTP/WinINet stack without external runtimes.
+Система обновлений для игры Grand Theft Auto: Vice City с графическим интерфейсом прямо во время игры, интеграцией с GitHub Releases, возможностью выбора любой из 5 последних версий, защитой от вредоносных путей (Zip-slip traversal) и атомарным транзакционным откатом.
 
 ---
 
-## Quick Installation
+## 1. Системные требования
 
-Copy the following files into your GTA Vice City game root directory (where `gta-vc.exe` is located):
-1. `updater.exe`
-2. `UpdateChecker.asi` (and optionally `scripts/UpdateChecker.asi`)
-3. `version.txt`
-
-Launch `gta-vc.exe`. During gameplay, press `0` to manage updates.
+- **Игра**: Grand Theft Auto: Vice City (v1.0 US).
+- **ASI Loader**: `dinput8.dll` (или Ultimate ASI Loader) в корне игры.
+- **Операционная система**: Windows 7 SP1 / 8.1 / 10 / 11 (x86 или x64).
+- **Подключение к сети**: доступ к `api.github.com` и `github.com` по HTTPS.
 
 ---
 
-## Repository Structure
+## 2. Основные возможности
 
-- `updater.exe` — The standalone updater application that downloads, extracts, and manages file rollbacks.
-- `UpdateChecker.asi` — The ASI plugin that runs in GTA: Vice City, listens for key `0`, and displays the Update Manager UI.
-- `version.txt` — Base local version file.
-- `version.json` — Manifest metadata for fallback version checks.
-- `src/checker/` — C++ source code for `UpdateChecker.asi`.
-- `src/updater/` — C++ source code for `updater.exe`.
+- **Управление прямо из игры**: нажмите клавишу **`0`** (или `Numpad 0`) во время геймплея для открытия Менеджера обновлений.
+- **Свобода выбора (5 версий)**: отображаются 5 последних релизов с GitHub. Вы можете установить новую версию, переустановить текущую или откатиться на старую.
+- **Безопасная транзакционная установка**:
+  - Предварительная проверка путей внутри архива до распаковки (`ResolveInsideRoot`).
+  - Распаковка во временную staging-папку (`%TEMP%\gtavc_upd_*`) с контролем размера (до 2 ГБ) и количества файлов (до 20 000).
+  - Запрет создания и следования по reparse points (symlink / junction).
+  - Журнал транзакции `.updaterbackups\pending.journal` с автоматическим откатом при сбое и восстановлением при аварийном завершении.
+- **Безопасный `delete.txt`**:
+  - Файлы удаляются только по строгим относительным путям.
+  - Запрет удаления системных файлов игры (`gta-vc.exe`, `dinput8.dll`, `updater.exe`).
+  - Все удаляемые файлы предварительно сохраняются в `.updaterbackups\<версия>\deleted\`.
+- **Проверка целостности SHA-256**:
+  - Хеширование через Windows Cryptography Next Generation (CNG / `bcrypt.lib`).
+  - Проверка домена источников по белому списку (строго HTTPS на домены GitHub).
+- **Поддержка любых путей**:
+  - Полный переход на Win32 Unicode API (`wchar_t`, `*W`), поддержка путей с кириллицей и пробелами.
+- **Нулевые зависимости**: статическая компиляция (`/MT`), отсутствие зависимости от `vcruntime140*.dll`.
 
 ---
 
-## How to Publish New Updates
+## 3. Установка для игрока
 
-1. Create a GitHub Release with a tag matching your version format (e.g. `v1.0.4`).
-2. Attach `update.zip` containing your updated/new files (maintaining game folder paths like `scripts/`, `modloader/`, etc.).
-3. If specific files must be deleted upon updating, include a `delete.txt` in the root of `update.zip` listing the relative paths to remove.
-4. Update `version.json` on branch `main` with the new version and release download URL.
+1. Скачайте последний релиз из вкладки **Releases** на GitHub.
+2. Скопируйте файлы в корневую папку GTA Vice City (где находится `gta-vc.exe`):
+   - `updater.exe`
+   - `UpdateChecker.asi` (можно положить в корень или в папку `scripts\`)
+   - `version.txt`
+3. Запустите игру. При первом входе появится окно приветствия. В процессе игры нажимайте `0` для вызова меню обновлений.
+
+---
+
+## 4. Конфигурация (`updater.ini`)
+
+Файл настроек создаётся автоматически рядом с игрой (или в `%LOCALAPPDATA%\GTAVC-UpdateManager\updater.ini`, если папка защищена от записи):
+
+```ini
+[Updater]
+Hotkey=0
+InfoShown=1
+```
+
+- `Hotkey` — клавиша вызова меню: цифры `'0'`..`'9'`, функциональные клавиши `F1`..`F12`.
+- `InfoShown` — флаг первого запуска (1 = окно приветствия уже было показано).
+
+---
+
+## 5. Публикация обновлений для авторов модов
+
+1. Для создания чистого релизного пакета запустите:
+   ```cmd
+   tools\make_release.bat
+   ```
+   Скрипт соберёт бинарники, сформирует архив `dist\update.zip` и сгенерирует контрольные суммы `dist\update.zip.sha256` и `dist\SHA256SUMS.txt`.
+2. Создайте релиз на GitHub с тегом версии формата SemVer (например, `v1.1.0`).
+3. Прикрепите файлы `update.zip` и `update.zip.sha256` к релизу.
+4. Если обновление должно удалить устаревшие файлы мода, поместите список относительных путей в файл `delete.txt` в корне архива `update.zip`.
+5. Обновите метаданные в `version.json` на ветке `main`.
+
+---
+
+## 6. Тестирование и верификация
+
+- **Автоматические тесты**:
+  - `tests/path_tests.cpp` — проверка защиты путей от directory traversal и DOS device names (31 тест).
+  - `tests/stage2_tests.cpp` — проверка транзакционной установки, staging, отката и журнала (3 теста).
+  - `tests/stage3_tests.cpp` — проверка безопасного `delete.txt` и восстановления из бэкапа (2 теста).
+  - `tests/stage4_tests.cpp` — проверка allowlist доменов, semver и хеширования SHA-256 (3 теста).
+  - `tests/stage5_7_tests.cpp` — проверка UTF-8 обрезки, singleton-мьютекса и кириллических путей (3 теста).
+- **Ручная проверка**: чеклист для игрока доступен в [tests/MANUAL.md](tests/MANUAL.md).
