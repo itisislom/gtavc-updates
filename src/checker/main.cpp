@@ -381,10 +381,34 @@ static void UpdateSelectionView(ManagerContext* ctx) {
     EnableWindow(ctx->hBtnInstall, TRUE);
 }
 
+struct ScopedCursor {
+    int counterDelta = 0;
+    ScopedCursor() {
+        ClipCursor(NULL);
+        ReleaseCapture();
+        while (true) {
+            int c = ShowCursor(TRUE);
+            counterDelta++;
+            if (c >= 0) break;
+        }
+        SetCursor(LoadCursor(NULL, IDC_ARROW));
+    }
+    ~ScopedCursor() {
+        while (counterDelta > 0) {
+            ShowCursor(FALSE);
+            counterDelta--;
+        }
+    }
+};
+
 static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     ManagerContext* ctx = (ManagerContext*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     switch (msg) {
+        case WM_SETCURSOR:
+            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            return TRUE;
+
         case WM_CREATE: {
             CREATESTRUCTW* cs = (CREATESTRUCTW*)lParam;
             ctx = (ManagerContext*)cs->lpCreateParams;
@@ -597,7 +621,11 @@ static void ShowUpdateManagerDialog(ManagerContext* ctx) {
                                 posX, posY, winW, winH,
                                 hParent, NULL, wc.hInstance, ctx);
 
+    ScopedCursor cursor;
+    SetCursorPos(posX + winW / 2, posY + winH / 2);
     SetForegroundWindow(hDlg);
+    SetActiveWindow(hDlg);
+    SetFocus(hDlg);
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0)) {
@@ -616,6 +644,10 @@ static void ShowUpdateManagerDialog(ManagerContext* ctx) {
 
 static LRESULT CALLBACK InfoDialogWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        case WM_SETCURSOR:
+            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            return TRUE;
+
         case WM_CREATE: {
             CREATESTRUCTW* cs = (CREATESTRUCTW*)lParam;
             HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
@@ -685,7 +717,11 @@ static void ShowUpdaterInfoDialog(HWND hParent) {
                                 posX, posY, winW, winH,
                                 hParent, NULL, wc.hInstance, NULL);
 
+    ScopedCursor cursor;
+    SetCursorPos(posX + winW / 2, posY + winH / 2);
     SetForegroundWindow(hDlg);
+    SetActiveWindow(hDlg);
+    SetFocus(hDlg);
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0)) {
@@ -765,12 +801,21 @@ static void OpenUpdateManager(HWND hGameWnd, BOOL showAlways) {
 
     if (ctx->releaseCount == 0) {
         if (showAlways) {
+            ScopedCursor cursor;
             MessageBoxW(hGameWnd,
                         netErrMsg[0] ? netErrMsg : L"Нет интернета для обновления.",
                         L"GTA: Vice City - Обновление",
                         MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
         }
         return;
+    }
+
+    // On automatic startup check (!showAlways), only open dialog if an update is actually available
+    if (!showAlways) {
+        int cmp = CompareSemanticVersions(ctx->releases[0].version, ctx->localVer);
+        if (cmp <= 0) {
+            return;
+        }
     }
 
     // Auto-select first item
