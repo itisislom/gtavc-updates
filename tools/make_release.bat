@@ -28,7 +28,7 @@ if exist "version.txt" (
 )
 
 echo [3/4] Creating dist\update.zip...
-tar.exe -cf "dist\update.zip" -C "dist\staging" .
+tar.exe -a -cf "dist\update.zip" -C "dist\staging" .
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to create dist\update.zip
     exit /b %ERRORLEVEL%
