@@ -304,6 +304,18 @@ static void CleanOrphanFilesOnRollback(const char* gameDir, const char* currentM
                     RemoveDirectoryA(targetPath);
                 } else {
                     DeleteFileA(targetPath);
+
+                    char parentRel[MAX_PATH];
+                    strcpy_s(parentRel, p);
+                    char* lastSlash = strrchr(parentRel, '\\');
+                    if (lastSlash) {
+                        *lastSlash = '\0';
+                        if (!IsProtectedGameDirectory(parentRel)) {
+                            char parentAbs[MAX_PATH];
+                            sprintf_s(parentAbs, "%s\\%s", gameDir, parentRel);
+                            RemoveDirectoryA(parentAbs);
+                        }
+                    }
                 }
             }
         }
