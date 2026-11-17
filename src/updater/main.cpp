@@ -348,9 +348,9 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     SetProgress(5);
 
     if (!DownloadFileWithProgress(p->downloadUrl, tempZip)) {
-        SetStatus("Download failed! Check your internet connection.");
-        MessageBoxA(g_hWnd, "Failed to download update files from GitHub.\nPlease try again later.",
-                    "Update Error", MB_ICONERROR | MB_OK);
+        SetStatus("Нет интернета для обновления.");
+        MessageBoxW(g_hWnd, L"Нет интернета для обновления.",
+                    L"GTA: Vice City - Update Error", MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
         PostMessage(g_hWnd, WM_CLOSE, 0, 0);
         return 1;
     }

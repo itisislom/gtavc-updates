@@ -559,7 +559,7 @@ static void OpenUpdateManager(HWND hGameWnd, BOOL showAlways) {
 
     if (ctx.releaseCount == 0) {
         if (showAlways) {
-            MessageBoxA(hGameWnd, "No releases found or network unreachable.", "Update Manager", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(hGameWnd, L"Нет интернета для обновления.", L"GTA: Vice City - Update Manager", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
         }
         return;
     }
