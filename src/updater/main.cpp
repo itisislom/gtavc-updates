@@ -267,16 +267,19 @@ static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* 
         return FALSE;
     }
 
-    unsigned char magic[4] = {0};
-    FILE* fCheck = nullptr;
-    _wfopen_s(&fCheck, destPath, L"rb");
-    if (fCheck) {
-        fread(magic, 1, 4, fCheck);
-        fclose(fCheck);
-    }
-    if (magic[0] != 'P' || magic[1] != 'K' || magic[2] != 3 || magic[3] != 4) {
-        DeleteFileW(destPath);
-        return FALSE;
+    const wchar_t* ext = wcsrchr(destPath, L'.');
+    if (ext && _wcsicmp(ext, L".zip") == 0) {
+        unsigned char magic[4] = {0};
+        FILE* fCheck = nullptr;
+        _wfopen_s(&fCheck, destPath, L"rb");
+        if (fCheck) {
+            fread(magic, 1, 4, fCheck);
+            fclose(fCheck);
+        }
+        if (magic[0] != 'P' || magic[1] != 'K' || magic[2] != 3 || magic[3] != 4) {
+            DeleteFileW(destPath);
+            return FALSE;
+        }
     }
 
     return TRUE;
@@ -617,14 +620,14 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     }
 
     if (params.newVersion[0] == L'\0') {
-        wcscpy_s(params.newVersion, L"1.0.0");
+        wcscpy_s(params.newVersion, L"1.0.3");
     }
     if (params.downloadUrl[0] == L'\0'
 #ifdef TESTHOOKS
         && params.localZip[0] == L'\0'
 #endif
     ) {
-        wcscpy_s(params.downloadUrl, L"https://github.com/itisislom/gtavc-updates/releases/download/v1.0.0/update.zip");
+        wcscpy_s(params.downloadUrl, L"https://github.com/itisislom/gtavc-updates/releases/download/v1.0.3/update.zip");
     }
     if (argvW) LocalFree(argvW);
 
