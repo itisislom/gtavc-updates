@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       - name: Setup MSVC x86 environment
-        uses: ilammy/msvc-dev-cmd@0b24e3138700ef54341b55979563d76378415ef4 # v1.13.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: x86
 
