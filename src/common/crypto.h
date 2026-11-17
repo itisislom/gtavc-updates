@@ -1,14 +1,24 @@
 #pragma once
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <wininet.h>
 #include <bcrypt.h>
 
+#pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "bcrypt.lib")
 
-// Validates that URL uses strictly HTTPS and matches trusted GitHub host allowlist:
-// github.com, api.github.com, raw.githubusercontent.com,
-// objects.githubusercontent.com, release-assets.githubusercontent.com
+// Validates initial URL via InternetCrackUrlW:
+// - Strictly HTTPS (port 443)
+// - No credentials (no UserName/Password, no '@')
+// - Host strictly in allowlist (github.com, api.github.com, raw.githubusercontent.com)
+// - Path strictly prefixed with /itisislom/gtavc-updates/
 bool ValidateUrl(const wchar_t* url);
+
+// Validates redirect target Location header via InternetCrackUrlW:
+// - Strictly HTTPS (port 443)
+// - No credentials (no UserName/Password, no '@')
+// - Host strictly in allowlist (github.com, objects.githubusercontent.com, release-assets.githubusercontent.com)
+bool ValidateRedirectTarget(const wchar_t* url);
 
 // Validates semantic version string against ^v?\d+\.\d+\.\d+([-.][A-Za-z0-9.]{1,16})?$
 bool ValidateSemVer(const wchar_t* version);

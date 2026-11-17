@@ -87,45 +87,93 @@ static BOOL WaitForGameExitWithUI(DWORD pid, DWORD maxWaitMs) {
 
 #define MAX_DOWNLOAD_LIMIT (1024ULL * 1024ULL * 1024ULL) // 1 GB
 
-static BOOL DownloadFileWithProgressW(const wchar_t* url, const wchar_t* destPath, wchar_t* outErrorMsg, size_t errLen) {
+static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* destPath, wchar_t* outErrorMsg, size_t errLen) {
+    if (!ValidateUrl(initialUrl)) {
+        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Недопустимый URL источника.");
+        return FALSE;
+    }
+
     HINTERNET hInternet = InternetOpenW(L"GTAVC-Updater", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) {
         if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
         return FALSE;
     }
 
-    HINTERNET hUrl = InternetOpenUrlW(hInternet, url, NULL, 0,
-                                      INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
-    if (!hUrl) {
-        DWORD err = GetLastError();
-        InternetCloseHandle(hInternet);
-        if (outErrorMsg) {
-            if (err == ERROR_INTERNET_TIMEOUT) {
-                swprintf_s(outErrorMsg, errLen, L"Сервер не отвечает (таймаут соединения).");
-            } else {
-                swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
-            }
-        }
-        return FALSE;
-    }
+    std::wstring currentUrl = initialUrl;
+    HINTERNET hUrl = NULL;
+    int redirectCount = 0;
+    const int MAX_REDIRECTS = 5;
 
-    DWORD statusCode = 0;
-    DWORD statusLen = sizeof(statusCode);
-    if (HttpQueryInfoW(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &statusCode, &statusLen, NULL)) {
-        if (statusCode != 200) {
-            InternetCloseHandle(hUrl);
+    while (redirectCount <= MAX_REDIRECTS) {
+        hUrl = InternetOpenUrlW(hInternet, currentUrl.c_str(), NULL, 0,
+                                INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_AUTO_REDIRECT, 0);
+        if (!hUrl) {
+            DWORD err = GetLastError();
             InternetCloseHandle(hInternet);
             if (outErrorMsg) {
-                if (statusCode == 404) {
-                    swprintf_s(outErrorMsg, errLen, L"Релиз не найден на сервере (HTTP 404).");
-                } else if (statusCode == 403 || statusCode == 429) {
-                    swprintf_s(outErrorMsg, errLen, L"Превышен лимит запросов к GitHub (rate limit). Подождите 1 час.");
+                if (err == ERROR_INTERNET_TIMEOUT) {
+                    swprintf_s(outErrorMsg, errLen, L"Сервер не отвечает (таймаут соединения).");
                 } else {
-                    swprintf_s(outErrorMsg, errLen, L"Ошибка сервера при скачивании (HTTP %lu).", statusCode);
+                    swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
                 }
             }
             return FALSE;
         }
+
+        DWORD statusCode = 0;
+        DWORD statusLen = sizeof(statusCode);
+        if (HttpQueryInfoW(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &statusCode, &statusLen, NULL)) {
+            if (statusCode == 301 || statusCode == 302 || statusCode == 303 || statusCode == 307 || statusCode == 308) {
+                wchar_t locBuf[2048] = { 0 };
+                DWORD locLen = sizeof(locBuf);
+                if (!HttpQueryInfoW(hUrl, HTTP_QUERY_LOCATION, locBuf, &locLen, NULL) || locBuf[0] == L'\0') {
+                    InternetCloseHandle(hUrl);
+                    InternetCloseHandle(hInternet);
+                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Пустой заголовок редиректа от сервера.");
+                    return FALSE;
+                }
+
+                InternetCloseHandle(hUrl);
+                hUrl = NULL;
+
+                if (!ValidateRedirectTarget(locBuf)) {
+                    InternetCloseHandle(hInternet);
+                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Неразрешённый хост редиректа: %ls", locBuf);
+                    return FALSE;
+                }
+
+                currentUrl = locBuf;
+                redirectCount++;
+                if (redirectCount > MAX_REDIRECTS) {
+                    InternetCloseHandle(hInternet);
+                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Превышено максимальное количество редиректов (5).");
+                    return FALSE;
+                }
+                continue;
+            }
+
+            if (statusCode != 200) {
+                InternetCloseHandle(hUrl);
+                InternetCloseHandle(hInternet);
+                if (outErrorMsg) {
+                    if (statusCode == 404) {
+                        swprintf_s(outErrorMsg, errLen, L"Релиз не найден на сервере (HTTP 404).");
+                    } else if (statusCode == 403 || statusCode == 429) {
+                        swprintf_s(outErrorMsg, errLen, L"Превышен лимит запросов к GitHub (rate limit). Подождите 1 час.");
+                    } else {
+                        swprintf_s(outErrorMsg, errLen, L"Ошибка сервера при скачивании (HTTP %lu).", statusCode);
+                    }
+                }
+                return FALSE;
+            }
+        }
+
+        break;
+    }
+
+    if (!hUrl) {
+        InternetCloseHandle(hInternet);
+        return FALSE;
     }
 
     DWORD totalBytes = 0;
@@ -303,16 +351,45 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         return 1;
     }
 
-    if (p->expectedSha256[0] != L'\0') {
-        SetStatusW(L"Проверка контрольной суммы SHA-256...");
-        if (!VerifySha256(tempZip, p->expectedSha256)) {
-            SafeDeleteDirectoryRecursive(tempWorkDir);
-            SetStatusW(L"Несовпадение SHA-256 архива.");
-            MessageBoxW(g_hWnd, L"Контрольная сумма SHA-256 скачанного обновления не совпадает с ожидаемой!\nАрхив удалён.",
-                        L"Ошибка целостности", MB_ICONERROR | MB_OK);
-            PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-            return 1;
+    // If expectedSha256 was not passed via CLI, attempt to fetch update.zip.sha256 from repository
+    if (p->expectedSha256[0] == L'\0') {
+        SetStatusW(L"Получение контрольной суммы update.zip.sha256...");
+        wchar_t shaUrl[1200];
+        swprintf_s(shaUrl, L"%ls.sha256", p->downloadUrl);
+        wchar_t shaDest[MAX_PATH];
+        swprintf_s(shaDest, L"%s\\update.zip.sha256", tempWorkDir);
+        wchar_t shaErr[512] = { 0 };
+        if (DownloadFileWithProgressW(shaUrl, shaDest, shaErr, 512)) {
+            FILE* sf = nullptr;
+            _wfopen_s(&sf, shaDest, L"r");
+            if (sf) {
+                if (fgetws(p->expectedSha256, 65, sf)) {
+                    wchar_t* nl = wcspbrk(p->expectedSha256, L"\r\n ");
+                    if (nl) *nl = L'\0';
+                }
+                fclose(sf);
+            }
         }
+    }
+
+    // Enforce mandatory SHA-256 check
+    if (p->expectedSha256[0] == L'\0') {
+        SafeDeleteDirectoryRecursive(tempWorkDir);
+        SetStatusW(L"Отсутствует контрольная сумма SHA-256.");
+        MessageBoxW(g_hWnd, L"Контрольная сумма update.zip.sha256 отсутствует на сервере! Установка отменена в целях безопасности.",
+                    L"Ошибка целостности", MB_ICONERROR | MB_OK);
+        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+        return 1;
+    }
+
+    SetStatusW(L"Проверка контрольной суммы SHA-256...");
+    if (!VerifySha256(tempZip, p->expectedSha256)) {
+        SafeDeleteDirectoryRecursive(tempWorkDir);
+        SetStatusW(L"Несовпадение SHA-256 архива.");
+        MessageBoxW(g_hWnd, L"Контрольная сумма SHA-256 скачанного обновления не совпадает с ожидаемой!\nАрхив удалён.",
+                    L"Ошибка целостности", MB_ICONERROR | MB_OK);
+        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+        return 1;
     }
 
     SetProgress(75);

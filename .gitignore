@@ -17,3 +17,5 @@ scripts/*.asi
 *.exe
 *.asi
 *.dll
+*.nativecodeanalysis.xml
+
