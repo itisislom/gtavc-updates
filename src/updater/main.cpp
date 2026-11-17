@@ -10,6 +10,7 @@
 #include <string>
 #include "updater_core.h"
 #include "../common/paths.h"
+#include "../common/crypto.h"
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -211,6 +212,7 @@ static void ReadCurrentVersionW(const wchar_t* gameDir, wchar_t* outVer, size_t 
 struct UpdateParams {
     wchar_t downloadUrl[1024];
     wchar_t newVersion[64];
+    wchar_t expectedSha256[65];
     DWORD gamePid;
     BOOL restartGame;
     int failAt;
@@ -220,6 +222,23 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     UpdateParams* p = (UpdateParams*)lpParam;
     wchar_t gameDir[MAX_PATH];
     GetGameDirW(gameDir, sizeof(gameDir) / sizeof(gameDir[0]));
+
+    // Security validation of input parameters
+    if (!ValidateUrl(p->downloadUrl)) {
+        SetStatusW(L"Недопустимый URL источника.");
+        MessageBoxW(g_hWnd, L"URL источника обновления не входит в доверенный список GitHub или не использует HTTPS.",
+                    L"Ошибка безопасности", MB_ICONERROR | MB_OK);
+        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+        return 1;
+    }
+
+    if (!ValidateSemVer(p->newVersion)) {
+        SetStatusW(L"Недопустимый формат версии.");
+        MessageBoxW(g_hWnd, L"Формат целевой версии не соответствует стандарту SemVer.",
+                    L"Ошибка валидации", MB_ICONERROR | MB_OK);
+        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+        return 1;
+    }
 
     SetStatusW(L"Ожидание выхода GTA: Vice City (до 5 мин)...");
     if (!WaitForGameExitWithUI(p->gamePid, 300000)) { // 5 minutes max
@@ -260,6 +279,18 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         }
         PostMessage(g_hWnd, WM_CLOSE, 0, 0);
         return 1;
+    }
+
+    if (p->expectedSha256[0] != L'\0') {
+        SetStatusW(L"Проверка контрольной суммы SHA-256...");
+        if (!VerifySha256(tempZip, p->expectedSha256)) {
+            SafeDeleteDirectoryRecursive(tempWorkDir);
+            SetStatusW(L"Несовпадение SHA-256 архива.");
+            MessageBoxW(g_hWnd, L"Контрольная сумма SHA-256 скачанного обновления не совпадает с ожидаемой!\nАрхив удалён.",
+                        L"Ошибка целостности", MB_ICONERROR | MB_OK);
+            PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+            return 1;
+        }
     }
 
     SetProgress(75);
@@ -407,6 +438,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
                 params.restartGame = FALSE;
             } else if (_wcsicmp(argvW[i], L"--fail-at") == 0 && i + 1 < argc) {
                 params.failAt = _wtoi(argvW[++i]);
+            } else if (_wcsicmp(argvW[i], L"--sha256") == 0 && i + 1 < argc) {
+                wcsncpy_s(params.expectedSha256, argvW[++i], 64);
             }
         }
     } else {

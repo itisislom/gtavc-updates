@@ -17,14 +17,14 @@ if not defined VCINSTALLDIR (
 if not exist "build" mkdir "build"
 
 echo [BUILD] Building UpdateChecker.asi (x86, /MT, /W4, /O2, /utf-8)...
-cl /nologo /O2 /MT /W4 /utf-8 /LD /Fe"build\UpdateChecker.asi" /Fo"build/" src\checker\main.cpp user32.lib gdi32.lib wininet.lib bcrypt.lib
+cl /nologo /O2 /MT /W4 /utf-8 /LD /Fe"build\UpdateChecker.asi" /Fo"build/" src\checker\main.cpp src\common\paths.cpp src\common\crypto.cpp user32.lib gdi32.lib wininet.lib bcrypt.lib
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to build UpdateChecker.asi
     exit /b %ERRORLEVEL%
 )
 
 echo [BUILD] Building updater.exe (x86, /MT, /W4, /O2, /utf-8)...
-cl /nologo /O2 /MT /W4 /utf-8 /DTESTHOOKS /Fe"build\updater.exe" /Fo"build/" src\updater\main.cpp src\updater\updater_core.cpp src\common\paths.cpp user32.lib gdi32.lib comctl32.lib wininet.lib shell32.lib bcrypt.lib
+cl /nologo /O2 /MT /W4 /utf-8 /DTESTHOOKS /Fe"build\updater.exe" /Fo"build/" src\updater\main.cpp src\updater\updater_core.cpp src\common\paths.cpp src\common\crypto.cpp user32.lib gdi32.lib comctl32.lib wininet.lib shell32.lib bcrypt.lib
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to build updater.exe
     exit /b %ERRORLEVEL%
