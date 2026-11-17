@@ -511,12 +511,146 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     fclose(jf);
     DeleteFileW(journalPath);
 
+    // Process delete.txt from stageDir safely
+    ProcessDeletions(gameRoot, stageDir, fromVersion, outResult);
+
     if (outResult) {
         outResult->success = true;
         outResult->filesCopied = (int)successfullyCopied.size();
         outResult->filesRolledBack = 0;
     }
 
+    return true;
+}
+
+bool ProcessDeletions(const wchar_t* gameRoot,
+                      const wchar_t* stageDir,
+                      const wchar_t* fromVersion,
+                      UpdateTransactionResult* outResult) {
+    if (outResult) {
+        outResult->success = true;
+    }
+
+    wchar_t delPath[MAX_PATH];
+    swprintf_s(delPath, L"%s\\delete.txt", stageDir);
+
+    DWORD delAttrs = GetFileAttributesW(delPath);
+    if (delAttrs == INVALID_FILE_ATTRIBUTES || (delAttrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        return true;
+    }
+
+    FILE* f = nullptr;
+    _wfopen_s(&f, delPath, L"r, ccs=UTF-8");
+    if (!f) {
+        _wfopen_s(&f, delPath, L"r");
+        if (!f) return true;
+    }
+
+    wchar_t backupBase[MAX_PATH];
+    swprintf_s(backupBase, L"%s\\.updaterbackups", gameRoot);
+    CreateDirectoryW(backupBase, nullptr);
+
+    wchar_t cleanVer[64];
+    wcsncpy_s(cleanVer, (fromVersion && fromVersion[0]) ? fromVersion : L"prev", 63);
+    for (wchar_t* c = cleanVer; *c; c++) {
+        if (*c == L':' || *c == L'/' || *c == L'\\') *c = L'_';
+    }
+
+    wchar_t backupVerDir[MAX_PATH];
+    swprintf_s(backupVerDir, L"%s\\%s", backupBase, cleanVer);
+    CreateDirectoryW(backupVerDir, nullptr);
+
+    wchar_t backupDeletedDir[MAX_PATH];
+    swprintf_s(backupDeletedDir, L"%s\\deleted", backupVerDir);
+    CreateDirectoryW(backupDeletedDir, nullptr);
+
+    wchar_t line[MAX_PATH];
+    while (fgetws(line, MAX_PATH, f)) {
+        wchar_t* nl = wcspbrk(line, L"\r\n");
+        if (nl) *nl = L'\0';
+
+        wchar_t* p = line;
+        while (*p == L' ' || *p == L'\t') p++;
+        size_t len = wcslen(p);
+        while (len > 0 && (p[len - 1] == L' ' || p[len - 1] == L'\t')) {
+            p[--len] = L'\0';
+        }
+        if (p[0] == L'\0' || p[0] == L'#') continue;
+
+        // Normalize slashes
+        for (wchar_t* c = p; *c; c++) {
+            if (*c == L'/') *c = L'\\';
+        }
+
+        // 1. ResolveInsideRoot: rejects .., absolute paths, ADS, DOS devices
+        wchar_t canonDst[MAX_PATH];
+        PathError pErr = PathError::Ok;
+        if (!ResolveInsideRoot(gameRoot, p, canonDst, MAX_PATH, &pErr)) {
+            continue;
+        }
+
+        // 2. IsProtectedPath: rejects gta-vc.exe, updater.exe, UpdateChecker.asi, dinput8.dll, system dirs
+        if (IsProtectedPath(gameRoot, p)) {
+            continue;
+        }
+
+        // 3. Inspect target file
+        DWORD attrs = GetFileAttributesW(canonDst);
+        if (attrs == INVALID_FILE_ATTRIBUTES) continue;
+
+        // 4. Refuse to delete directories
+        if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+            continue;
+        }
+
+        // 5. Refuse to follow reparse points
+        if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
+            continue;
+        }
+
+        // 6. Backup before deleting into .updaterbackups\<fromVer>\deleted\<relPath>
+        wchar_t backupDst[MAX_PATH];
+        swprintf_s(backupDst, L"%s\\%ls", backupDeletedDir, p);
+        EnsureParentDirectoryExists(backupDst);
+
+        if (!MoveFileExW(canonDst, backupDst, MOVEFILE_REPLACE_EXISTING)) {
+            CopyFileW(canonDst, backupDst, FALSE);
+            DeleteFileW(canonDst);
+        }
+    }
+
+    fclose(f);
+    DeleteFileW(delPath);
+    return true;
+}
+
+bool RestoreDeletedBackups(const wchar_t* gameRoot, const wchar_t* fromVersion) {
+    wchar_t cleanVer[64];
+    wcsncpy_s(cleanVer, (fromVersion && fromVersion[0]) ? fromVersion : L"prev", 63);
+    for (wchar_t* c = cleanVer; *c; c++) {
+        if (*c == L':' || *c == L'/' || *c == L'\\') *c = L'_';
+    }
+
+    wchar_t backupDeletedDir[MAX_PATH];
+    swprintf_s(backupDeletedDir, L"%s\\.updaterbackups\\%s\\deleted", gameRoot, cleanVer);
+
+    DWORD attrs = GetFileAttributesW(backupDeletedDir);
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        return false;
+    }
+
+    std::vector<std::wstring> delFiles;
+    CollectFilesRecursive(backupDeletedDir, backupDeletedDir, delFiles);
+    for (const auto& rel : delFiles) {
+        wchar_t srcPath[MAX_PATH];
+        swprintf_s(srcPath, L"%s\\%ls", backupDeletedDir, rel.c_str());
+
+        wchar_t dstPath[MAX_PATH];
+        swprintf_s(dstPath, L"%s\\%ls", gameRoot, rel.c_str());
+        EnsureParentDirectoryExists(dstPath);
+
+        MoveFileExW(srcPath, dstPath, MOVEFILE_REPLACE_EXISTING);
+    }
     return true;
 }
 

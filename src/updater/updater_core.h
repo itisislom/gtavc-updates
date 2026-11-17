@@ -49,6 +49,16 @@ bool RecoverPendingTransaction(const wchar_t* gameRoot,
 // Checks if pending.journal exists
 bool HasPendingJournal(const wchar_t* gameRoot);
 
+// Processes delete.txt safely from staging directory
+bool ProcessDeletions(const wchar_t* gameRoot,
+                      const wchar_t* stageDir,
+                      const wchar_t* fromVersion,
+                      UpdateTransactionResult* outResult);
+
+// Restores deleted files from .updaterbackups/<version>/deleted back to gameRoot (for rollback)
+bool RestoreDeletedBackups(const wchar_t* gameRoot,
+                           const wchar_t* fromVersion);
+
 // Removes directory recursively with reparse point safety
 void SafeDeleteDirectoryRecursive(const wchar_t* path);
 
