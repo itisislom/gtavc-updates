@@ -47,7 +47,7 @@ static bool IsDosDeviceName(const wchar_t* seg, size_t segLen) {
     return false;
 }
 
-bool HasReparsePointInChain(const wchar_t* path) {
+bool HasReparsePointInChain(const wchar_t* path, const wchar_t* root) {
     if (!path || !path[0]) return false;
 
     wchar_t probe[MAX_PATH];
@@ -55,21 +55,41 @@ bool HasReparsePointInChain(const wchar_t* path) {
     wcsncpy_s(probe, path, MAX_PATH - 1);
     probe[MAX_PATH - 1] = L'\0';
 
-    // Step down directory hierarchy
-    for (wchar_t* p = probe; *p; p++) {
-        if (*p == L'\\') {
-            *p = L'\0';
-            DWORD attrs = GetFileAttributesW(probe);
-            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
-                return true;
+    size_t rootLen = 0;
+    if (root && root[0]) {
+        wchar_t canonRoot[MAX_PATH];
+        DWORD rlen = GetFullPathNameW(root, MAX_PATH, canonRoot, nullptr);
+        if (rlen > 0 && rlen < MAX_PATH) {
+            while (rlen > 0 && (canonRoot[rlen - 1] == L'\\' || canonRoot[rlen - 1] == L'/')) {
+                canonRoot[--rlen] = L'\0';
             }
-            *p = L'\\';
+            if (_wcsnicmp(probe, canonRoot, rlen) == 0) {
+                rootLen = rlen;
+            }
         }
     }
 
-    DWORD finalAttrs = GetFileAttributesW(probe);
-    if (finalAttrs != INVALID_FILE_ATTRIBUTES && (finalAttrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
-        return true;
+    // Step down directory hierarchy only for components below rootLen
+    for (wchar_t* p = probe; *p; p++) {
+        if (*p == L'\\') {
+            size_t currentLen = (size_t)(p - probe);
+            if (currentLen > rootLen) {
+                *p = L'\0';
+                DWORD attrs = GetFileAttributesW(probe);
+                if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
+                    return true;
+                }
+                *p = L'\\';
+            }
+        }
+    }
+
+    size_t totalLen = wcslen(probe);
+    if (totalLen > rootLen) {
+        DWORD finalAttrs = GetFileAttributesW(probe);
+        if (finalAttrs != INVALID_FILE_ATTRIBUTES && (finalAttrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            return true;
+        }
     }
     return false;
 }
@@ -178,8 +198,8 @@ bool ResolveInsideRoot(
         return setErr(PathError::OutsideRoot);
     }
 
-    // 8. Check reparse point
-    if (HasReparsePointInChain(canonCandidate)) {
+    // 8. Check reparse point below canonRoot
+    if (HasReparsePointInChain(canonCandidate, canonRoot)) {
         return setErr(PathError::ReparsePoint);
     }
 
@@ -211,51 +231,69 @@ bool IsProtectedPath(const wchar_t* root, const wchar_t* fullOrRelPath) {
         canonRoot[--lenRoot] = L'\0';
     }
 
-    // Relative to canonRoot
+    auto checkRelMatch = [](const wchar_t* rel) -> bool {
+        if (!rel) return true;
+        while (*rel == L'\\' || *rel == L'/') rel++;
+
+        // Protected exact files
+        static const wchar_t* protectedFiles[] = {
+            L"gta-vc.exe",
+            L"updater.exe",
+            L"UpdateChecker.asi",
+            L"dinput8.dll",
+            L"updater.ini",
+            L"installed_manifest.txt",
+            L"pending.journal"
+        };
+        for (const auto& file : protectedFiles) {
+            if (_wcsicmp(rel, file) == 0) {
+                return true;
+            }
+        }
+
+        // Protected directories
+        static const wchar_t* protectedDirs[] = {
+            L"",
+            L".",
+            L".updaterbackups",
+            L"scripts",
+            L"modloader",
+            L"cleo",
+            L"data",
+            L"models",
+            L"txd",
+            L"audio",
+            L"anim",
+            L"movies",
+            L"text",
+            L"_tools"
+        };
+        for (const auto& dir : protectedDirs) {
+            if (_wcsicmp(rel, dir) == 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // 1. Direct relative match
     const wchar_t* rel = target;
     if (_wcsnicmp(target, canonRoot, lenRoot) == 0) {
         rel = target + lenRoot;
         while (*rel == L'\\') rel++;
     }
+    if (checkRelMatch(rel)) return true;
 
-    // Protected exact files
-    static const wchar_t* protectedFiles[] = {
-        L"gta-vc.exe",
-        L"updater.exe",
-        L"UpdateChecker.asi",
-        L"dinput8.dll",
-        L"updater.ini",
-        L"installed_manifest.txt"
-    };
-
-    for (const auto& file : protectedFiles) {
-        if (_wcsicmp(rel, file) == 0) {
-            return true;
+    // 2. 8.3 short name canonicalization via GetLongPathNameW
+    wchar_t longPath[MAX_PATH];
+    DWORD longLen = GetLongPathNameW(target, longPath, MAX_PATH);
+    if (longLen > 0 && longLen < MAX_PATH) {
+        const wchar_t* longRel = longPath;
+        if (_wcsnicmp(longPath, canonRoot, lenRoot) == 0) {
+            longRel = longPath + lenRoot;
+            while (*longRel == L'\\') longRel++;
         }
-    }
-
-    // Protected directories
-    static const wchar_t* protectedDirs[] = {
-        L"",
-        L".",
-        L".updaterbackups",
-        L"scripts",
-        L"modloader",
-        L"cleo",
-        L"data",
-        L"models",
-        L"txd",
-        L"audio",
-        L"anim",
-        L"movies",
-        L"text",
-        L"_tools"
-    };
-
-    for (const auto& dir : protectedDirs) {
-        if (_wcsicmp(rel, dir) == 0) {
-            return true;
-        }
+        if (checkRelMatch(longRel)) return true;
     }
 
     // Never allow deleting the root directory itself

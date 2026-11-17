@@ -11,6 +11,13 @@ struct UpdateTransactionResult {
     wchar_t errorMessage[512];
 };
 
+// Logs update actions to <gameRoot>\updater.log
+void LogUpdate(const wchar_t* gameRoot,
+               const wchar_t* action,
+               const wchar_t* status,
+               const wchar_t* path,
+               const wchar_t* detail = nullptr);
+
 // Generates a secure, random temporary directory path under %TEMP%
 bool CreateSecureTempDir(wchar_t* outDir, size_t maxLen);
 
@@ -52,12 +59,19 @@ bool HasPendingJournal(const wchar_t* gameRoot);
 // Processes delete.txt safely from staging directory
 bool ProcessDeletions(const wchar_t* gameRoot,
                       const wchar_t* stageDir,
-                      const wchar_t* fromVersion,
+                      const wchar_t* fromVersionOrBackupDir,
                       UpdateTransactionResult* outResult);
+
+// Overload for ProcessDeletions with journal handle
+bool ProcessDeletionsWithJournal(const wchar_t* gameRoot,
+                                const wchar_t* stageDir,
+                                const wchar_t* backupDeletedDir,
+                                FILE* jf,
+                                UpdateTransactionResult* outResult);
 
 // Restores deleted files from .updaterbackups/<version>/deleted back to gameRoot (for rollback)
 bool RestoreDeletedBackups(const wchar_t* gameRoot,
-                           const wchar_t* fromVersion);
+                           const wchar_t* fromVersionOrBackupDir);
 
 // Removes directory recursively with reparse point safety
 void SafeDeleteDirectoryRecursive(const wchar_t* path);

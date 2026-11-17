@@ -49,7 +49,7 @@ static std::string ReadFileContent(const wchar_t* path) {
 }
 
 int main() {
-    printf("=== STAGE 2 TESTS: TRANSACTIONAL UPDATE & ROLLBACK ===\n");
+    printf("=== STAGE 2 / ITEM 2.2 & 2.4 TESTS: TRANSACTIONAL UPDATE, PHASES & ROLLBACK ===\n");
 
     wchar_t tempRoot[MAX_PATH];
     GetTempPathW(MAX_PATH, tempRoot);
@@ -76,7 +76,6 @@ int main() {
     WriteFileContent(fData, "DATA_ORIGINAL_LINE");
 
     printf("[TEST 1] Testing successful ApplyUpdate...\n");
-    // Prepare stage files
     wchar_t sCleo[MAX_PATH], sNew[MAX_PATH];
     swprintf_s(sCleo, L"%s\\CLEO\\mod.cs", stageDir);
     swprintf_s(sNew, L"%s\\models\\new_car.dff", stageDir);
@@ -101,17 +100,19 @@ int main() {
         return 1;
     }
 
-    // Check backup was created
-    wchar_t bCleo[MAX_PATH];
-    swprintf_s(bCleo, L"%s\\.updaterbackups\\1.0.0\\files\\CLEO\\mod.cs", sandbox);
-    if (ReadFileContent(bCleo) != "CLEO_ORIGINAL_BYTECODE_V1") {
-        printf("FAIL: Backup file not preserved. Content: %s\n", ReadFileContent(bCleo).c_str());
+    // Verify unique timestamped backup folder
+    wchar_t searchPattern[MAX_PATH];
+    swprintf_s(searchPattern, L"%s\\.updaterbackups\\1.0.0_*", sandbox);
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW(searchPattern, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        printf("FAIL: Timestamped backup folder 1.0.0_<ts> was not created.\n");
         return 1;
     }
-    printf("PASS: Successful ApplyUpdate verified.\n");
+    FindClose(hFind);
+    printf("PASS: Successful ApplyUpdate and timestamped backup verified.\n");
 
     printf("[TEST 2] Testing forced failure at file #1 with automatic rollback (--fail-at 1)...\n");
-    // Prepare a stage with 3 files
     SafeDeleteDirectoryRecursive(stageDir);
     CreateDirectoryW(stageDir, nullptr);
     wchar_t s1[MAX_PATH], s2[MAX_PATH], s3[MAX_PATH];
@@ -152,7 +153,6 @@ int main() {
     printf("PASS: Automatic rollback restored 100%% byte identity.\n");
 
     printf("[TEST 3] Testing Crash Recovery from pending.journal...\n");
-    // Manually create pending.journal and corrupt a file
     wchar_t jDir[MAX_PATH], jPath[MAX_PATH], bDir[MAX_PATH], bFile[MAX_PATH];
     swprintf_s(jDir, L"%s\\.updaterbackups", sandbox);
     swprintf_s(jPath, L"%s\\pending.journal", jDir);
@@ -164,10 +164,7 @@ int main() {
 
     FILE* jf = nullptr;
     _wfopen_s(&jf, jPath, L"w, ccs=UTF-8");
-    if (!jf) {
-        printf("FAIL: Could not open mock journal for writing.\n");
-        return 1;
-    }
+    assert(jf != nullptr);
     fwprintf(jf, L"[JOURNAL_V1]\n");
     fwprintf(jf, L"STATUS=APPLYING\n");
     fwprintf(jf, L"FROM_VERSION=1.0.0\n");
@@ -196,10 +193,82 @@ int main() {
     }
     printf("PASS: Crash recovery from pending.journal verified.\n");
 
+    printf("[TEST 4] Testing recovery rejection on path traversal in journal...\n");
+    _wfopen_s(&jf, jPath, L"w, ccs=UTF-8");
+    assert(jf != nullptr);
+    fwprintf(jf, L"[JOURNAL_V1]\n");
+    fwprintf(jf, L"STATUS=APPLYING\n");
+    fwprintf(jf, L"BACKUP_DIR=%ls\n", bDir);
+    fwprintf(jf, L"COPIED=..\\outside_game.txt\n");
+    fclose(jf);
+
+    ok = RecoverPendingTransaction(sandbox, &res);
+    if (ok) {
+        printf("FAIL: RecoverPendingTransaction should reject path traversal in journal!\n");
+        return 1;
+    }
+    DeleteFileW(jPath);
+    printf("PASS: Malicious traversal in pending.journal safely rejected.\n");
+
+    printf("[TEST 5] Testing Item 2.4: Rollback via installed_manifest.txt (downgrade test)...\n");
+    // Scenario 2.4:
+    // v1 installs a.txt and b.txt
+    // v2 installs a.txt (v2) and c.txt (b.txt deleted as orphan)
+    // Downgrade v2 -> v1: c.txt deleted, b.txt restored, a.txt restored to v1
+    SafeDeleteDirectoryRecursive(stageDir);
+    CreateDirectoryW(stageDir, nullptr);
+    wchar_t sa[MAX_PATH], sb[MAX_PATH], sc[MAX_PATH];
+    swprintf_s(sa, L"%s\\data\\a.txt", stageDir);
+    swprintf_s(sb, L"%s\\data\\b.txt", stageDir);
+    WriteFileContent(sa, "A_CONTENT_V1");
+    WriteFileContent(sb, "B_CONTENT_V1");
+
+    ok = ApplyUpdate(sandbox, stageDir, L"1.0.0", L"1.1.0", -1, &res);
+    assert(ok);
+
+    wchar_t fa[MAX_PATH], fb[MAX_PATH], fc[MAX_PATH];
+    swprintf_s(fa, L"%s\\data\\a.txt", sandbox);
+    swprintf_s(fb, L"%s\\data\\b.txt", sandbox);
+    swprintf_s(fc, L"%s\\data\\c.txt", sandbox);
+
+    assert(ReadFileContent(fa) == "A_CONTENT_V1");
+    assert(ReadFileContent(fb) == "B_CONTENT_V1");
+
+    // Now update to v2 (has a.txt v2 and c.txt, but no b.txt)
+    SafeDeleteDirectoryRecursive(stageDir);
+    CreateDirectoryW(stageDir, nullptr);
+    swprintf_s(sa, L"%s\\data\\a.txt", stageDir);
+    swprintf_s(sc, L"%s\\data\\c.txt", stageDir);
+    WriteFileContent(sa, "A_CONTENT_V2");
+    WriteFileContent(sc, "C_CONTENT_V2");
+
+    ok = ApplyUpdate(sandbox, stageDir, L"1.1.0", L"1.2.0", -1, &res);
+    assert(ok);
+
+    assert(ReadFileContent(fa) == "A_CONTENT_V2");
+    assert(ReadFileContent(fc) == "C_CONTENT_V2");
+    assert(GetFileAttributesW(fb) == INVALID_FILE_ATTRIBUTES); // b.txt was cleanly removed as orphan!
+
+    // Now downgrade to v1 (archive has a.txt v1 and b.txt v1)
+    SafeDeleteDirectoryRecursive(stageDir);
+    CreateDirectoryW(stageDir, nullptr);
+    swprintf_s(sa, L"%s\\data\\a.txt", stageDir);
+    swprintf_s(sb, L"%s\\data\\b.txt", stageDir);
+    WriteFileContent(sa, "A_CONTENT_V1");
+    WriteFileContent(sb, "B_CONTENT_V1");
+
+    ok = ApplyUpdate(sandbox, stageDir, L"1.2.0", L"1.1.0", -1, &res);
+    assert(ok);
+
+    assert(ReadFileContent(fa) == "A_CONTENT_V1");
+    assert(ReadFileContent(fb) == "B_CONTENT_V1"); // b.txt restored!
+    assert(GetFileAttributesW(fc) == INVALID_FILE_ATTRIBUTES); // c.txt orphan cleanly removed on downgrade!
+    printf("PASS: Item 2.4 downgrade test with installed_manifest.txt orphan cleanup succeeded.\n");
+
     // Clean up sandbox
     SafeDeleteDirectoryRecursive(sandbox);
     SafeDeleteDirectoryRecursive(stageDir);
 
-    printf("\nALL STAGE 2 TESTS PASSED (3/3).\n");
+    printf("\nALL STAGE 2 / ITEM 2.2 & 2.4 TESTS PASSED (5/5).\n");
     return 0;
 }

@@ -282,6 +282,7 @@ struct UpdateParams {
     wchar_t downloadUrl[1024];
     wchar_t newVersion[64];
     wchar_t expectedSha256[65];
+    wchar_t localZip[MAX_PATH];
     DWORD gamePid;
     BOOL restartGame;
     int failAt;
@@ -293,12 +294,14 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     GetGameDirW(gameDir, sizeof(gameDir) / sizeof(gameDir[0]));
 
     // Security validation of input parameters
-    if (!ValidateUrl(p->downloadUrl)) {
-        SetStatusW(L"Недопустимый URL источника.");
-        MessageBoxW(g_hWnd, L"URL источника обновления не входит в доверенный список GitHub или не использует HTTPS.",
-                    L"Ошибка безопасности", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+    if (p->localZip[0] == L'\0') {
+        if (!ValidateUrl(p->downloadUrl)) {
+            SetStatusW(L"Недопустимый URL источника.");
+            MessageBoxW(g_hWnd, L"URL источника обновления не входит в доверенный список GitHub или не использует HTTPS.",
+                        L"Ошибка безопасности", MB_ICONERROR | MB_OK);
+            PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+            return 1;
+        }
     }
 
     if (!ValidateSemVer(p->newVersion)) {
@@ -334,40 +337,65 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     wchar_t tempZip[MAX_PATH];
     swprintf_s(tempZip, L"%s\\update.zip", tempWorkDir);
 
-    SetStatusW(L"Подключение к GitHub...");
-    SetProgress(5);
-
-    wchar_t downloadErr[512] = { 0 };
-    if (!DownloadFileWithProgressW(p->downloadUrl, tempZip, downloadErr, 512)) {
-        SafeDeleteDirectoryRecursive(tempWorkDir);
-        if (g_bCancelRequested) {
-            SetStatusW(L"Обновление отменено.");
-        } else {
-            SetStatusW(downloadErr[0] ? downloadErr : L"Нет интернета для обновления.");
-            MessageBoxW(g_hWnd, downloadErr[0] ? downloadErr : L"Нет интернета для обновления.",
-                        L"GTA: Vice City - Update Error", MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
+    if (p->localZip[0] != L'\0') {
+        SetStatusW(L"Использование локального архива...");
+        if (!CopyFileW(p->localZip, tempZip, FALSE)) {
+            SafeDeleteDirectoryRecursive(tempWorkDir);
+            SetStatusW(L"Локальный архив не найден.");
+            MessageBoxW(g_hWnd, L"Локальный файл архива не найден.", L"Ошибка", MB_ICONERROR | MB_OK);
+            PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+            return 1;
         }
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
-    }
 
-    // If expectedSha256 was not passed via CLI, attempt to fetch update.zip.sha256 from repository
-    if (p->expectedSha256[0] == L'\0') {
-        SetStatusW(L"Получение контрольной суммы update.zip.sha256...");
-        wchar_t shaUrl[1200];
-        swprintf_s(shaUrl, L"%ls.sha256", p->downloadUrl);
-        wchar_t shaDest[MAX_PATH];
-        swprintf_s(shaDest, L"%s\\update.zip.sha256", tempWorkDir);
-        wchar_t shaErr[512] = { 0 };
-        if (DownloadFileWithProgressW(shaUrl, shaDest, shaErr, 512)) {
+        if (p->expectedSha256[0] == L'\0') {
+            wchar_t localSha[MAX_PATH];
+            swprintf_s(localSha, L"%ls.sha256", p->localZip);
             FILE* sf = nullptr;
-            _wfopen_s(&sf, shaDest, L"r");
+            _wfopen_s(&sf, localSha, L"r");
             if (sf) {
                 if (fgetws(p->expectedSha256, 65, sf)) {
                     wchar_t* nl = wcspbrk(p->expectedSha256, L"\r\n ");
                     if (nl) *nl = L'\0';
                 }
                 fclose(sf);
+            }
+        }
+    } else {
+        SetStatusW(L"Подключение к GitHub...");
+        SetProgress(5);
+
+        wchar_t downloadErr[512] = { 0 };
+        if (!DownloadFileWithProgressW(p->downloadUrl, tempZip, downloadErr, 512)) {
+            SafeDeleteDirectoryRecursive(tempWorkDir);
+            if (g_bCancelRequested) {
+                SetStatusW(L"Обновление отменено.");
+            } else {
+                SetStatusW(downloadErr[0] ? downloadErr : L"Нет интернета для обновления.");
+                MessageBoxW(g_hWnd, downloadErr[0] ? downloadErr : L"Нет интернета для обновления.",
+                            L"GTA: Vice City - Update Error", MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
+            }
+            PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+            return 1;
+        }
+
+        // If expectedSha256 was not passed via CLI, attempt to fetch update.zip.sha256 from repository
+        if (p->expectedSha256[0] == L'\0') {
+            SetStatusW(L"Получение контрольной суммы update.zip.sha256...");
+            wchar_t shaUrl[1200];
+            swprintf_s(shaUrl, L"%ls.sha256", p->downloadUrl);
+            wchar_t shaDest[MAX_PATH];
+            swprintf_s(shaDest, L"%s\\update.zip.sha256", tempWorkDir);
+            wchar_t shaErr[512] = { 0 };
+            if (DownloadFileWithProgressW(shaUrl, shaDest, shaErr, 512)) {
+                FILE* sf = nullptr;
+                _wfopen_s(&sf, shaDest, L"r");
+                if (sf) {
+                    if (fgetws(p->expectedSha256, 65, sf)) {
+                        wchar_t* nl = wcspbrk(p->expectedSha256, L"\r\n ");
+                        if (nl) *nl = L'\0';
+                    }
+                    fclose(sf);
+                }
             }
         }
     }
@@ -443,16 +471,6 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         return 1;
     }
 
-    // Update version.txt
-    wchar_t verFile[MAX_PATH];
-    swprintf_s(verFile, L"%s\\version.txt", gameDir);
-    FILE* vf = nullptr;
-    _wfopen_s(&vf, verFile, L"w");
-    if (vf) {
-        fwprintf(vf, L"%ls\n", p->newVersion);
-        fclose(vf);
-    }
-
     SafeDeleteDirectoryRecursive(tempWorkDir);
     PruneOldBackups(gameDir, 5);
 
@@ -506,30 +524,12 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     swprintf_s(oldUpdater, L"%s\\updater.exe.old", gameDir);
     DeleteFileW(oldUpdater);
 
-    // Write permission check on game directory
+    // Write permission check on game directory (Item 2.5: no silent runas elevation fallback)
     wchar_t testFile[MAX_PATH];
     swprintf_s(testFile, L"%s\\.write_test", gameDir);
     HANDLE hTest = CreateFileW(testFile, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hTest == INVALID_HANDLE_VALUE) {
-        BOOL isElevated = FALSE;
-        HANDLE hToken = NULL;
-        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
-            TOKEN_ELEVATION elev = { 0 };
-            DWORD cbSize = sizeof(elev);
-            if (GetTokenInformation(hToken, TokenElevation, &elev, sizeof(elev), &cbSize)) {
-                isElevated = (elev.TokenIsElevated != 0);
-            }
-            CloseHandle(hToken);
-        }
-        if (!isElevated) {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            HINSTANCE hInst = ShellExecuteW(NULL, L"runas", exePath, GetCommandLineW(), gameDir, SW_SHOWNORMAL);
-            if ((INT_PTR)hInst > 32) {
-                return 0; // successfully launched elevated instance
-            }
-        }
-        MessageBoxW(NULL, L"Требуются права администратора для записи в папку игры.",
+        MessageBoxW(NULL, L"Нет прав на запись в папку игры. Запустите игру или программу с необходимыми правами доступа.",
                     L"Ошибка прав доступа", MB_ICONERROR | MB_OK);
         return 1;
     }
@@ -558,29 +558,42 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     UpdateParams params;
     memset(&params, 0, sizeof(params));
     params.failAt = -1;
+    params.restartGame = TRUE;
 
     int argc = 0;
     LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (argc >= 4) {
-        wcsncpy_s(params.downloadUrl, argvW[1], 1023);
-        wcsncpy_s(params.newVersion, argvW[2], 63);
-        params.gamePid = (DWORD)_wtoi(argvW[3]);
-        params.restartGame = TRUE;
-
-        for (int i = 4; i < argc; i++) {
-            if (_wcsicmp(argvW[i], L"--no-restart") == 0) {
-                params.restartGame = FALSE;
-            } else if (_wcsicmp(argvW[i], L"--fail-at") == 0 && i + 1 < argc) {
-                params.failAt = _wtoi(argvW[++i]);
+    if (argc >= 2) {
+        for (int i = 1; i < argc; i++) {
+            if (_wcsicmp(argvW[i], L"--local-zip") == 0 && i + 1 < argc) {
+                wcsncpy_s(params.localZip, argvW[++i], MAX_PATH - 1);
+            } else if (_wcsicmp(argvW[i], L"--version") == 0 && i + 1 < argc) {
+                wcsncpy_s(params.newVersion, argvW[++i], 63);
             } else if (_wcsicmp(argvW[i], L"--sha256") == 0 && i + 1 < argc) {
                 wcsncpy_s(params.expectedSha256, argvW[++i], 64);
+            } else if (_wcsicmp(argvW[i], L"--fail-at") == 0 && i + 1 < argc) {
+                params.failAt = _wtoi(argvW[++i]);
+            } else if (_wcsicmp(argvW[i], L"--no-restart") == 0) {
+                params.restartGame = FALSE;
+            } else if (_wcsicmp(argvW[i], L"--game-pid") == 0 && i + 1 < argc) {
+                params.gamePid = (DWORD)_wtoi(argvW[++i]);
+            } else if (params.downloadUrl[0] == L'\0' && argvW[i][0] != L'-') {
+                // Positional: <url> <version> <gamePid>
+                wcsncpy_s(params.downloadUrl, argvW[i], 1023);
+                if (i + 1 < argc && argvW[i + 1][0] != L'-') {
+                    wcsncpy_s(params.newVersion, argvW[++i], 63);
+                }
+                if (i + 1 < argc && argvW[i + 1][0] != L'-') {
+                    params.gamePid = (DWORD)_wtoi(argvW[++i]);
+                }
             }
         }
-    } else {
-        wcscpy_s(params.downloadUrl, L"https://github.com/itisislom/gtavc-updates/releases/download/v1.0.0/update.zip");
+    }
+
+    if (params.newVersion[0] == L'\0') {
         wcscpy_s(params.newVersion, L"1.0.0");
-        params.gamePid = 0;
-        params.restartGame = TRUE;
+    }
+    if (params.downloadUrl[0] == L'\0' && params.localZip[0] == L'\0') {
+        wcscpy_s(params.downloadUrl, L"https://github.com/itisislom/gtavc-updates/releases/download/v1.0.0/update.zip");
     }
     if (argvW) LocalFree(argvW);
 

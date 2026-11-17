@@ -35,4 +35,4 @@ bool IsProtectedPath(
     const wchar_t* fullOrRelPath
 );
 
-bool HasReparsePointInChain(const wchar_t* path);
+bool HasReparsePointInChain(const wchar_t* path, const wchar_t* root = nullptr);
