@@ -242,11 +242,19 @@ bool ValidateZipContents(const wchar_t* zipPath,
         std::wstring wline(wlen, L'\0');
         MultiByteToWideChar(CP_UTF8, 0, rawLine.c_str(), (int)rawLine.size(), &wline[0], wlen);
 
+        // Strip leading dot-slash prefixes
+        while (wline.size() >= 2 && wline[0] == L'.' && (wline[1] == L'/' || wline[1] == L'\\')) {
+            wline.erase(0, 2);
+        }
+        while (!wline.empty() && (wline.front() == L'/' || wline.front() == L'\\')) {
+            wline.erase(0, 1);
+        }
+
         bool isDir = (!wline.empty() && (wline.back() == L'/' || wline.back() == L'\\'));
         if (isDir) {
             wline.pop_back();
-            if (wline.empty()) continue;
         }
+        if (wline.empty() || wline == L".") continue;
 
         if (IsForbiddenArchiveEntry(wline)) {
             if (outError) {

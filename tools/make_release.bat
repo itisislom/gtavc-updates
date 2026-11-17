@@ -35,7 +35,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo [4/4] Generating SHA-256 checksums...
-powershell -NoProfile -Command "$hash = (Get-FileHash -Algorithm SHA256 dist\update.zip).Hash.ToLower(); Set-Content -Path dist\update.zip.sha256 -Value $hash -NoNewline; Write-Host ('update.zip SHA256: ' + $hash)"
+powershell -NoProfile -Command "$hash = (Get-FileHash -Algorithm SHA256 dist\update.zip).Hash.ToLower(); [System.IO.File]::WriteAllText('dist\update.zip.sha256', $hash, [System.Text.Encoding]::ASCII); Write-Host ('update.zip SHA256: ' + $hash)"
 powershell -NoProfile -Command "Get-FileHash -Algorithm SHA256 dist\update.zip, dist\staging\UpdateChecker.asi, dist\staging\updater.exe | ForEach-Object { ($_.Hash.ToLower() + '  ' + [System.IO.Path]::GetFileName($_.Path)) } | Set-Content dist\SHA256SUMS.txt; Get-Content dist\SHA256SUMS.txt"
 
 echo.

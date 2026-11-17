@@ -21,11 +21,41 @@
 
 #define IDC_BTN_CANCEL 1010
 
+static void GetGameDirW(wchar_t* outDir, size_t maxLen) {
+    GetModuleFileNameW(NULL, outDir, (DWORD)maxLen);
+    wchar_t* lastSlash = wcsrchr(outDir, L'\\');
+    if (lastSlash) {
+        *lastSlash = L'\0';
+    } else {
+        wcscpy_s(outDir, maxLen, L".");
+    }
+}
+
+#ifdef TESTHOOKS
+static int ShowMessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType) {
+    if (GetEnvironmentVariableW(L"GTAVC_TEST_AUTOMATION", nullptr, 0) > 0) {
+        wchar_t gDir[MAX_PATH];
+        GetGameDirW(gDir, MAX_PATH);
+        LogUpdate(gDir, L"DIALOG", lpCaption ? lpCaption : L"MSG", lpText ? lpText : L"");
+        return IDOK;
+    }
+    return MessageBoxW(hWnd, lpText, lpCaption, uType);
+}
+#define MessageBoxW ShowMessageBoxW
+#endif
+
 static HWND g_hWnd = NULL;
 static HWND g_hStatus = NULL;
 static HWND g_hProgress = NULL;
 static HWND g_hBtnCancel = NULL;
 static volatile BOOL g_bCancelRequested = FALSE;
+static int g_nExitCode = 0;
+
+static DWORD ExitWorkerThread(DWORD code) {
+    g_nExitCode = (int)code;
+    PostMessage(g_hWnd, WM_CLOSE, 0, 0);
+    return code;
+}
 
 static void SetStatusW(const wchar_t* text) {
     if (g_hStatus) {
@@ -37,16 +67,6 @@ static void SetStatusW(const wchar_t* text) {
 static void SetProgress(int percent) {
     if (g_hProgress) {
         SendMessage(g_hProgress, PBM_SETPOS, percent, 0);
-    }
-}
-
-static void GetGameDirW(wchar_t* outDir, size_t maxLen) {
-    GetModuleFileNameW(NULL, outDir, (DWORD)maxLen);
-    wchar_t* lastSlash = wcsrchr(outDir, L'\\');
-    if (lastSlash) {
-        *lastSlash = L'\0';
-    } else {
-        wcscpy_s(outDir, maxLen, L".");
     }
 }
 
@@ -299,8 +319,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
             SetStatusW(L"Недопустимый URL источника.");
             MessageBoxW(g_hWnd, L"URL источника обновления не входит в доверенный список GitHub или не использует HTTPS.",
                         L"Ошибка безопасности", MB_ICONERROR | MB_OK);
-            PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-            return 1;
+            return ExitWorkerThread(1);
         }
     }
 
@@ -308,8 +327,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         SetStatusW(L"Недопустимый формат версии.");
         MessageBoxW(g_hWnd, L"Формат целевой версии не соответствует стандарту SemVer.",
                     L"Ошибка валидации", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
 
     SetStatusW(L"Ожидание выхода GTA: Vice City (до 5 мин)...");
@@ -321,8 +339,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
             MessageBoxW(g_hWnd, L"Время ожидания выхода игры истекло.", L"Обновление отменено", MB_ICONWARNING | MB_OK);
         }
         Sleep(1000);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
     Sleep(300);
 
@@ -330,8 +347,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     if (!CreateSecureTempDir(tempWorkDir, MAX_PATH)) {
         SetStatusW(L"Ошибка создания временной папки.");
         MessageBoxW(g_hWnd, L"Не удалось создать временную директорию.", L"Ошибка", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
 
     wchar_t tempZip[MAX_PATH];
@@ -343,8 +359,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
             SafeDeleteDirectoryRecursive(tempWorkDir);
             SetStatusW(L"Локальный архив не найден.");
             MessageBoxW(g_hWnd, L"Локальный файл архива не найден.", L"Ошибка", MB_ICONERROR | MB_OK);
-            PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-            return 1;
+            return ExitWorkerThread(1);
         }
 
         if (p->expectedSha256[0] == L'\0') {
@@ -374,8 +389,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
                 MessageBoxW(g_hWnd, downloadErr[0] ? downloadErr : L"Нет интернета для обновления.",
                             L"GTA: Vice City - Update Error", MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
             }
-            PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-            return 1;
+            return ExitWorkerThread(1);
         }
 
         // If expectedSha256 was not passed via CLI, attempt to fetch update.zip.sha256 from repository
@@ -406,8 +420,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         SetStatusW(L"Отсутствует контрольная сумма SHA-256.");
         MessageBoxW(g_hWnd, L"Контрольная сумма update.zip.sha256 отсутствует на сервере! Установка отменена в целях безопасности.",
                     L"Ошибка целостности", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
 
     SetStatusW(L"Проверка контрольной суммы SHA-256...");
@@ -416,8 +429,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         SetStatusW(L"Несовпадение SHA-256 архива.");
         MessageBoxW(g_hWnd, L"Контрольная сумма SHA-256 скачанного обновления не совпадает с ожидаемой!\nАрхив удалён.",
                     L"Ошибка целостности", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
 
     SetProgress(75);
@@ -429,8 +441,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
         SetStatusW(L"Ошибка безопасности архива.");
         MessageBoxW(g_hWnd, errBuf, L"Ошибка проверки архива", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
 
     SetProgress(82);
@@ -442,16 +453,14 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
         SetStatusW(L"Ошибка распаковки.");
         MessageBoxW(g_hWnd, errBuf, L"Ошибка распаковки", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
 
     if (!ValidateStageDirectory(stageDir, 20000, 2ULL * 1024 * 1024 * 1024, errBuf, 512)) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
         SetStatusW(L"Лимит файлов или reparse point.");
         MessageBoxW(g_hWnd, errBuf, L"Превышение лимитов архива", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
 
     wchar_t currentVer[64] = { 0 };
@@ -467,8 +476,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         wchar_t failMsg[1024];
         swprintf_s(failMsg, L"Не удалось применить обновление:\n%ls\n\nВсе изменения были автоматически откатаны.", txRes.errorMessage);
         MessageBoxW(g_hWnd, failMsg, L"Ошибка обновления", MB_ICONERROR | MB_OK);
-        PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-        return 1;
+        return ExitWorkerThread(1);
     }
 
     SafeDeleteDirectoryRecursive(tempWorkDir);
@@ -487,8 +495,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         Sleep(1200);
     }
 
-    PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-    return 0;
+    return ExitWorkerThread(0);
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -502,7 +509,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             break;
         case WM_DESTROY:
-            PostQuitMessage(0);
+            PostQuitMessage(g_nExitCode);
             return 0;
     }
     return DefWindowProcW(hWnd, msg, wParam, lParam);
@@ -646,5 +653,5 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
         DispatchMessageW(&msg);
     }
 
-    return 0;
+    return (g_nExitCode != 0) ? g_nExitCode : (int)msg.wParam;
 }

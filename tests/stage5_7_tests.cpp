@@ -150,8 +150,15 @@ int main() {
         return 1;
     }
 
+    wchar_t searchPattern[MAX_PATH];
+    swprintf_s(searchPattern, L"%s\\.updaterbackups\\1.0.0_*", cyrillicGame);
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW(searchPattern, &fd);
+    assert(hFind != INVALID_HANDLE_VALUE);
     wchar_t bCleo[MAX_PATH];
-    swprintf_s(bCleo, L"%s\\.updaterbackups\\1.0.0\\deleted\\CLEO\\русский_скрипт.cs", cyrillicGame);
+    swprintf_s(bCleo, L"%s\\.updaterbackups\\%ls\\deleted\\CLEO\\русский_скрипт.cs", cyrillicGame, fd.cFileName);
+    FindClose(hFind);
+
     if (ReadFileContent(bCleo) != "ORIGINAL_CYRILLIC_SCRIPT_V1") {
         printf("FAIL: Backup on Cyrillic path failed! Path: %ls\n", bCleo);
         return 1;
