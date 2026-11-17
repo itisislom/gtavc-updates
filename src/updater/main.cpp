@@ -258,15 +258,68 @@ static void BackupItemRecursive(const char* srcPath, const char* dstPath) {
     }
 }
 
-static void BackupDeletedItem(const char* gameDir, const char* relPath) {
+#define MAX_BACKUP_SLOTS 5
+
+static void PruneOldBackups(const char* gameDir, int maxSlots) {
+    char searchPath[MAX_PATH];
+    sprintf_s(searchPath, "%s\\.updaterbackups\\*.*", gameDir);
+
+    struct FolderEntry {
+        char path[MAX_PATH];
+        FILETIME ft;
+    } entries[32];
+    int count = 0;
+
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(searchPath, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (count < 32) {
+                sprintf_s(entries[count].path, "%s\\.updaterbackups\\%s", gameDir, fd.cFileName);
+                entries[count].ft = fd.ftCreationTime;
+                count++;
+            }
+        }
+    } while (FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+
+    if (count <= maxSlots) return;
+
+    // Bubble sort by creation time ascending (oldest first)
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (CompareFileTime(&entries[i].ft, &entries[j].ft) > 0) {
+                struct FolderEntry tmp = entries[i];
+                entries[i] = entries[j];
+                entries[j] = tmp;
+            }
+        }
+    }
+
+    int toDelete = count - maxSlots;
+    for (int i = 0; i < toDelete; i++) {
+        DeletePathRecursive(entries[i].path);
+    }
+}
+
+static void BackupDeletedItem(const char* gameDir, const char* fromVersion, const char* relPath) {
     char srcPath[MAX_PATH];
     sprintf_s(srcPath, "%s\\%s", gameDir, relPath);
 
     DWORD attrs = GetFileAttributesA(srcPath);
     if (attrs == INVALID_FILE_ATTRIBUTES) return;
 
+    char cleanVer[64];
+    strcpy_s(cleanVer, (fromVersion && fromVersion[0]) ? fromVersion : "prev_update");
+    for (char* c = cleanVer; *c; c++) {
+        if (*c == ':' || *c == '/' || *c == '\\') *c = '_';
+    }
+
     char dstPath[MAX_PATH];
-    sprintf_s(dstPath, "%s\\.updaterbackups\\%s", gameDir, relPath);
+    sprintf_s(dstPath, "%s\\.updaterbackups\\%s\\%s", gameDir, cleanVer, relPath);
 
     BackupItemRecursive(srcPath, dstPath);
 }
@@ -306,10 +359,25 @@ static void RestoreBackupsRecursive(const char* currentDir, const char* backupRo
 static void RestoreAllBackups(const char* gameDir) {
     char backupDir[MAX_PATH];
     sprintf_s(backupDir, "%s\\.updaterbackups", gameDir);
-    DWORD attrs = GetFileAttributesA(backupDir);
-    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        RestoreBackupsRecursive(backupDir, backupDir, gameDir);
-    }
+
+    char searchPath[MAX_PATH];
+    sprintf_s(searchPath, "%s\\*.*", backupDir);
+
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(searchPath, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            char verDir[MAX_PATH];
+            sprintf_s(verDir, "%s\\%s", backupDir, fd.cFileName);
+            RestoreBackupsRecursive(verDir, verDir, gameDir);
+            RemoveDirectoryA(verDir);
+        }
+    } while (FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+    RemoveDirectoryA(backupDir);
 }
 
 static int CompareSemanticVersions(const char* v1, const char* v2) {
@@ -348,13 +416,14 @@ static void ReadCurrentVersion(const char* gameDir, char* outVer, size_t maxLen)
     }
 }
 
-static void ProcessDeletions(const char* gameDir) {
+static void ProcessDeletions(const char* gameDir, const char* fromVersion) {
     char delFile[MAX_PATH];
     sprintf_s(delFile, "%s\\delete.txt", gameDir);
     FILE* f = fopen(delFile, "r");
     if (!f) return;
 
     char line[MAX_PATH];
+    BOOL backedUpAny = FALSE;
     while (fgets(line, sizeof(line), f)) {
         char* nl = strpbrk(line, "\r\n");
         if (nl) *nl = '\0';
@@ -363,7 +432,8 @@ static void ProcessDeletions(const char* gameDir) {
         NormalizePath(p);
         if (p[0] == '\0' || p[0] == '#' || IsProtectedGameDirectory(p)) continue;
 
-        BackupDeletedItem(gameDir, p);
+        BackupDeletedItem(gameDir, fromVersion, p);
+        backedUpAny = TRUE;
 
         char targetPath[MAX_PATH];
         sprintf_s(targetPath, "%s\\%s", gameDir, p);
@@ -371,6 +441,10 @@ static void ProcessDeletions(const char* gameDir) {
     }
     fclose(f);
     DeleteFileA(delFile);
+
+    if (backedUpAny) {
+        PruneOldBackups(gameDir, MAX_BACKUP_SLOTS);
+    }
 }
 
 static BOOL GenerateManifestFromZip(const char* zipPath, const char* outManifestPath) {
@@ -536,7 +610,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     }
 
     // 4. Process delete.txt if provided in package (creates backups into .updaterbackups)
-    ProcessDeletions(gameDir);
+    ProcessDeletions(gameDir, currentVer);
 
     // 4. Save incoming manifest as installed manifest
     CopyFileA(tempManifest, installedManifest, FALSE);
