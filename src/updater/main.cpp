@@ -17,6 +17,7 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "advapi32.lib")
 
 #define IDC_BTN_CANCEL 1010
 
@@ -86,14 +87,25 @@ static BOOL WaitForGameExitWithUI(DWORD pid, DWORD maxWaitMs) {
 
 #define MAX_DOWNLOAD_LIMIT (1024ULL * 1024ULL * 1024ULL) // 1 GB
 
-static BOOL DownloadFileWithProgressW(const wchar_t* url, const wchar_t* destPath) {
+static BOOL DownloadFileWithProgressW(const wchar_t* url, const wchar_t* destPath, wchar_t* outErrorMsg, size_t errLen) {
     HINTERNET hInternet = InternetOpenW(L"GTAVC-Updater", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
-    if (!hInternet) return FALSE;
+    if (!hInternet) {
+        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
+        return FALSE;
+    }
 
     HINTERNET hUrl = InternetOpenUrlW(hInternet, url, NULL, 0,
                                       INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
     if (!hUrl) {
+        DWORD err = GetLastError();
         InternetCloseHandle(hInternet);
+        if (outErrorMsg) {
+            if (err == ERROR_INTERNET_TIMEOUT) {
+                swprintf_s(outErrorMsg, errLen, L"Сервер не отвечает (таймаут соединения).");
+            } else {
+                swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
+            }
+        }
         return FALSE;
     }
 
@@ -103,6 +115,15 @@ static BOOL DownloadFileWithProgressW(const wchar_t* url, const wchar_t* destPat
         if (statusCode != 200) {
             InternetCloseHandle(hUrl);
             InternetCloseHandle(hInternet);
+            if (outErrorMsg) {
+                if (statusCode == 404) {
+                    swprintf_s(outErrorMsg, errLen, L"Релиз не найден на сервере (HTTP 404).");
+                } else if (statusCode == 403 || statusCode == 429) {
+                    swprintf_s(outErrorMsg, errLen, L"Превышен лимит запросов к GitHub (rate limit). Подождите 1 час.");
+                } else {
+                    swprintf_s(outErrorMsg, errLen, L"Ошибка сервера при скачивании (HTTP %lu).", statusCode);
+                }
+            }
             return FALSE;
         }
     }
@@ -268,13 +289,14 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     SetStatusW(L"Подключение к GitHub...");
     SetProgress(5);
 
-    if (!DownloadFileWithProgressW(p->downloadUrl, tempZip)) {
+    wchar_t downloadErr[512] = { 0 };
+    if (!DownloadFileWithProgressW(p->downloadUrl, tempZip, downloadErr, 512)) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
         if (g_bCancelRequested) {
             SetStatusW(L"Обновление отменено.");
         } else {
-            SetStatusW(L"Нет интернета для обновления.");
-            MessageBoxW(g_hWnd, L"Нет интернета для обновления.",
+            SetStatusW(downloadErr[0] ? downloadErr : L"Нет интернета для обновления.");
+            MessageBoxW(g_hWnd, downloadErr[0] ? downloadErr : L"Нет интернета для обновления.",
                         L"GTA: Vice City - Update Error", MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
         }
         PostMessage(g_hWnd, WM_CLOSE, 0, 0);
@@ -401,6 +423,41 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 
     wchar_t gameDir[MAX_PATH];
     GetGameDirW(gameDir, sizeof(gameDir) / sizeof(gameDir[0]));
+
+    // Remove legacy updater.exe.old from previous self-update if present
+    wchar_t oldUpdater[MAX_PATH];
+    swprintf_s(oldUpdater, L"%s\\updater.exe.old", gameDir);
+    DeleteFileW(oldUpdater);
+
+    // Write permission check on game directory
+    wchar_t testFile[MAX_PATH];
+    swprintf_s(testFile, L"%s\\.write_test", gameDir);
+    HANDLE hTest = CreateFileW(testFile, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hTest == INVALID_HANDLE_VALUE) {
+        BOOL isElevated = FALSE;
+        HANDLE hToken = NULL;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+            TOKEN_ELEVATION elev = { 0 };
+            DWORD cbSize = sizeof(elev);
+            if (GetTokenInformation(hToken, TokenElevation, &elev, sizeof(elev), &cbSize)) {
+                isElevated = (elev.TokenIsElevated != 0);
+            }
+            CloseHandle(hToken);
+        }
+        if (!isElevated) {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            HINSTANCE hInst = ShellExecuteW(NULL, L"runas", exePath, GetCommandLineW(), gameDir, SW_SHOWNORMAL);
+            if ((INT_PTR)hInst > 32) {
+                return 0; // successfully launched elevated instance
+            }
+        }
+        MessageBoxW(NULL, L"Требуются права администратора для записи в папку игры.",
+                    L"Ошибка прав доступа", MB_ICONERROR | MB_OK);
+        return 1;
+    }
+    CloseHandle(hTest);
+    DeleteFileW(testFile);
 
     // Check for pending journal crash recovery on startup
     if (HasPendingJournal(gameDir)) {
