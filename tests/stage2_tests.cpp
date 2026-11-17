@@ -265,10 +265,82 @@ int main() {
     assert(GetFileAttributesW(fc) == INVALID_FILE_ATTRIBUTES); // c.txt orphan cleanly removed on downgrade!
     printf("PASS: Item 2.4 downgrade test with installed_manifest.txt orphan cleanup succeeded.\n");
 
+    printf("[TEST 6] Testing Item 4(a): Failure on ATTEMPT file & recovery of unconfirmed ATTEMPT...\n");
+    // (a) Crash recovery of an ATTEMPT record without COPIED
+    wchar_t fAttempt[MAX_PATH], bAttempt[MAX_PATH];
+    swprintf_s(fAttempt, L"%s\\data\\attempt.txt", sandbox);
+    swprintf_s(bAttempt, L"%s\\files\\data\\attempt.txt", bDir);
+    WriteFileContent(bAttempt, "ORIGINAL_ATTEMPT_FILE_BEFORE_UPDATE");
+    WriteFileContent(fAttempt, "PARTIALLY_COPIED_OR_CORRUPT_NEW_DATA");
+
+    _wfopen_s(&jf, jPath, L"w, ccs=UTF-8");
+    assert(jf != nullptr);
+    fwprintf(jf, L"[JOURNAL_V1]\n");
+    fwprintf(jf, L"STATUS=APPLYING\n");
+    fwprintf(jf, L"FROM_VERSION=1.0.0\n");
+    fwprintf(jf, L"BACKUP_DIR=%ls\n", bDir);
+    fwprintf(jf, L"ATTEMPT=data\\attempt.txt\n"); // ATTEMPT without COPIED!
+    fclose(jf);
+
+    ok = RecoverPendingTransaction(sandbox, &res);
+    if (!ok) {
+        printf("FAIL: RecoverPendingTransaction failed for ATTEMPT without COPIED.\n");
+        return 1;
+    }
+    if (ReadFileContent(fAttempt) != "ORIGINAL_ATTEMPT_FILE_BEFORE_UPDATE") {
+        printf("FAIL: ATTEMPT file was not restored from backup! Got: %s\n", ReadFileContent(fAttempt).c_str());
+        return 1;
+    }
+    printf("PASS: Item 4(a) ATTEMPT file restoration verified.\n");
+
+    printf("[TEST 7] Testing Item 4(b): Crash in FINALIZING & recovery of version.txt / manifest...\n");
+    // Write pre-update manifest and version
+    wchar_t fManifest[MAX_PATH];
+    swprintf_s(fManifest, L"%s\\installed_manifest.txt", sandbox);
+    WriteFileContent(fVer, "1.0.0\n");
+    WriteFileContent(fManifest, "data\\a.txt\ndata\\b.txt\n");
+
+    SafeDeleteDirectoryRecursive(stageDir);
+    CreateDirectoryW(stageDir, nullptr);
+    wchar_t sFinalFile[MAX_PATH];
+    swprintf_s(sFinalFile, L"%s\\data\\c.txt", stageDir);
+    WriteFileContent(sFinalFile, "C_FINALIZING_DATA");
+
+    // failAtFileIndex = 9999 triggers crash right in FINALIZING
+    ok = ApplyUpdate(sandbox, stageDir, L"1.0.0", L"2.0.0", 9999, &res);
+    if (ok) {
+        printf("FAIL: ApplyUpdate should have failed with testhook 9999 in FINALIZING.\n");
+        return 1;
+    }
+
+    if (!HasPendingJournal(sandbox)) {
+        printf("FAIL: pending.journal should exist after simulated FINALIZING crash.\n");
+        return 1;
+    }
+
+    // Now run crash recovery
+    ok = RecoverPendingTransaction(sandbox, &res);
+    if (!ok) {
+        printf("FAIL: RecoverPendingTransaction failed after FINALIZING crash.\n");
+        return 1;
+    }
+
+    std::string recoveredVer = ReadFileContent(fVer);
+    if (recoveredVer.find("1.0.0") == std::string::npos) {
+        printf("FAIL: version.txt was not restored to 1.0.0! Content: %s\n", recoveredVer.c_str());
+        return 1;
+    }
+    std::string recoveredManifest = ReadFileContent(fManifest);
+    if (recoveredManifest.find("data\\a.txt") == std::string::npos || recoveredManifest.find("data\\b.txt") == std::string::npos) {
+        printf("FAIL: installed_manifest.txt was not restored to original content! Content:\n%s\n", recoveredManifest.c_str());
+        return 1;
+    }
+    printf("PASS: Item 4(b) crash in FINALIZING recovered version.txt and manifest cleanly.\n");
+
     // Clean up sandbox
     SafeDeleteDirectoryRecursive(sandbox);
     SafeDeleteDirectoryRecursive(stageDir);
 
-    printf("\nALL STAGE 2 / ITEM 2.2 & 2.4 TESTS PASSED (5/5).\n");
+    printf("\nALL STAGE 2 / ITEM 2.2 & 2.4 TESTS PASSED (7/7).\n");
     return 0;
 }

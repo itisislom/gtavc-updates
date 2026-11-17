@@ -302,10 +302,12 @@ struct UpdateParams {
     wchar_t downloadUrl[1024];
     wchar_t newVersion[64];
     wchar_t expectedSha256[65];
+#ifdef TESTHOOKS
     wchar_t localZip[MAX_PATH];
+    int failAt;
+#endif
     DWORD gamePid;
     BOOL restartGame;
-    int failAt;
 };
 
 static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
@@ -314,14 +316,18 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     GetGameDirW(gameDir, sizeof(gameDir) / sizeof(gameDir[0]));
 
     // Security validation of input parameters
+#ifdef TESTHOOKS
     if (p->localZip[0] == L'\0') {
+#endif
         if (!ValidateUrl(p->downloadUrl)) {
             SetStatusW(L"Недопустимый URL источника.");
             MessageBoxW(g_hWnd, L"URL источника обновления не входит в доверенный список GitHub или не использует HTTPS.",
                         L"Ошибка безопасности", MB_ICONERROR | MB_OK);
             return ExitWorkerThread(1);
         }
+#ifdef TESTHOOKS
     }
+#endif
 
     if (!ValidateSemVer(p->newVersion)) {
         SetStatusW(L"Недопустимый формат версии.");
@@ -353,6 +359,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     wchar_t tempZip[MAX_PATH];
     swprintf_s(tempZip, L"%s\\update.zip", tempWorkDir);
 
+#ifdef TESTHOOKS
     if (p->localZip[0] != L'\0') {
         SetStatusW(L"Использование локального архива...");
         if (!CopyFileW(p->localZip, tempZip, FALSE)) {
@@ -376,6 +383,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
             }
         }
     } else {
+#endif
         SetStatusW(L"Подключение к GitHub...");
         SetProgress(5);
 
@@ -412,7 +420,9 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
                 }
             }
         }
+#ifdef TESTHOOKS
     }
+#endif
 
     // Enforce mandatory SHA-256 check
     if (p->expectedSha256[0] == L'\0') {
@@ -470,7 +480,12 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     SetStatusW(L"Применение обновления...");
 
     UpdateTransactionResult txRes;
-    if (!ApplyUpdate(gameDir, stageDir, currentVer, p->newVersion, p->failAt, &txRes)) {
+#ifdef TESTHOOKS
+    int failAtIdx = p->failAt;
+#else
+    int failAtIdx = -1;
+#endif
+    if (!ApplyUpdate(gameDir, stageDir, currentVer, p->newVersion, failAtIdx, &txRes)) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
         SetStatusW(L"Сбой обновления! Произведён откат.");
         wchar_t failMsg[1024];
@@ -564,21 +579,26 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 
     UpdateParams params;
     memset(&params, 0, sizeof(params));
+#ifdef TESTHOOKS
     params.failAt = -1;
+#endif
     params.restartGame = TRUE;
 
     int argc = 0;
     LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argc >= 2) {
         for (int i = 1; i < argc; i++) {
+#ifdef TESTHOOKS
             if (_wcsicmp(argvW[i], L"--local-zip") == 0 && i + 1 < argc) {
                 wcsncpy_s(params.localZip, argvW[++i], MAX_PATH - 1);
-            } else if (_wcsicmp(argvW[i], L"--version") == 0 && i + 1 < argc) {
+            } else if (_wcsicmp(argvW[i], L"--fail-at") == 0 && i + 1 < argc) {
+                params.failAt = _wtoi(argvW[++i]);
+            } else
+#endif
+            if (_wcsicmp(argvW[i], L"--version") == 0 && i + 1 < argc) {
                 wcsncpy_s(params.newVersion, argvW[++i], 63);
             } else if (_wcsicmp(argvW[i], L"--sha256") == 0 && i + 1 < argc) {
                 wcsncpy_s(params.expectedSha256, argvW[++i], 64);
-            } else if (_wcsicmp(argvW[i], L"--fail-at") == 0 && i + 1 < argc) {
-                params.failAt = _wtoi(argvW[++i]);
             } else if (_wcsicmp(argvW[i], L"--no-restart") == 0) {
                 params.restartGame = FALSE;
             } else if (_wcsicmp(argvW[i], L"--game-pid") == 0 && i + 1 < argc) {
@@ -599,7 +619,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     if (params.newVersion[0] == L'\0') {
         wcscpy_s(params.newVersion, L"1.0.0");
     }
-    if (params.downloadUrl[0] == L'\0' && params.localZip[0] == L'\0') {
+    if (params.downloadUrl[0] == L'\0'
+#ifdef TESTHOOKS
+        && params.localZip[0] == L'\0'
+#endif
+    ) {
         wcscpy_s(params.downloadUrl, L"https://github.com/itisislom/gtavc-updates/releases/download/v1.0.0/update.zip");
     }
     if (argvW) LocalFree(argvW);

@@ -106,6 +106,9 @@ static int GetConfiguredHotkey(const wchar_t* iniPath) {
     wchar_t keyStr[32] = { 0 };
     GetPrivateProfileStringW(L"Updater", L"Hotkey", L"0", keyStr, 32, iniPath);
 
+    if (_wcsicmp(keyStr, L"disabled") == 0 || _wcsicmp(keyStr, L"none") == 0 || _wcsicmp(keyStr, L"off") == 0) {
+        return -1; // Disabled
+    }
     if (keyStr[0] >= L'0' && keyStr[0] <= L'9' && keyStr[1] == L'\0') {
         return '0' + (keyStr[0] - L'0');
     }
@@ -476,16 +479,17 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                 wchar_t confirmMsg[512];
                 if (cmp > 0) {
                     swprintf_s(confirmMsg,
-                               L"Установить обновление до %ls?\n\n"
-                               L"Игра будет закрыта для применения обновления.", item->tag);
+                               L"Установить новую версию %ls?\n\n"
+                               L"Игра будет закрыта, несохранённый прогресс будет потерян.", item->tag);
                 } else if (cmp < 0) {
                     swprintf_s(confirmMsg,
                                L"Откатиться на предыдущую версию %ls?\n\n"
-                               L"Новые файлы будут удалены, а сохранённые бэкапы восстановлены. Игра будет закрыта.", item->tag);
+                               L"Новые файлы будут удалены, а сохранённые бэкапы восстановлены.\n\n"
+                               L"Игра будет закрыта, несохранённый прогресс будет потерян.", item->tag);
                 } else {
                     swprintf_s(confirmMsg,
                                L"Переустановить версию %ls?\n\n"
-                               L"Игра будет закрыта для повторной установки файлов.", item->tag);
+                               L"Игра будет закрыта, несохранённый прогресс будет потерян.", item->tag);
                 }
 
                 int res = MessageBoxW(hWnd, confirmMsg, L"Подтверждение обновления",
@@ -820,11 +824,14 @@ static DWORD WINAPI CheckerThread(LPVOID lpParam) {
     // Initial silent check / startup info dialog
     OpenUpdateManager(hGameWnd, FALSE);
 
+    // Cache configured hotkey once at thread start
+    int targetVk = GetConfiguredHotkey(iniPath);
+
     ULONGLONG lastTriggerTick = 0;
     while (true) {
         Sleep(50);
+        if (targetVk < 0) continue; // Hotkey=disabled: ignore hotkey polling
 
-        int targetVk = GetConfiguredHotkey(iniPath);
         bool keyPressed = (GetAsyncKeyState(targetVk) & 0x8000) != 0;
         if (targetVk == '0') {
             keyPressed = keyPressed || ((GetAsyncKeyState(VK_NUMPAD0) & 0x8000) != 0);

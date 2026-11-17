@@ -394,11 +394,11 @@ bool ValidateStageDirectory(const wchar_t* stageDir,
 static void CollectFilesRecursive(const wchar_t* dirPath,
                                   const wchar_t* baseStageDir,
                                   std::vector<std::wstring>& outRelFiles) {
-    wchar_t searchPattern[MAX_PATH];
-    swprintf_s(searchPattern, L"%s\\*.*", dirPath);
+    std::wstring searchPattern = std::wstring(dirPath) + L"\\*.*";
+    if (searchPattern.size() >= MAX_PATH) return;
 
     WIN32_FIND_DATAW fd;
-    HANDLE hFind = FindFirstFileW(searchPattern, &fd);
+    HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &fd);
     if (hFind == INVALID_HANDLE_VALUE) return;
 
     size_t baseLen = wcslen(baseStageDir);
@@ -406,13 +406,13 @@ static void CollectFilesRecursive(const wchar_t* dirPath,
     do {
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
 
-        wchar_t fullPath[MAX_PATH];
-        swprintf_s(fullPath, L"%s\\%s", dirPath, fd.cFileName);
+        std::wstring fullPath = std::wstring(dirPath) + L"\\" + fd.cFileName;
+        if (fullPath.size() >= MAX_PATH) continue;
 
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            CollectFilesRecursive(fullPath, baseStageDir, outRelFiles);
+            CollectFilesRecursive(fullPath.c_str(), baseStageDir, outRelFiles);
         } else {
-            const wchar_t* rel = fullPath + baseLen;
+            const wchar_t* rel = fullPath.c_str() + baseLen;
             while (*rel == L'\\' || *rel == L'/') rel++;
             outRelFiles.push_back(rel);
         }
@@ -422,9 +422,9 @@ static void CollectFilesRecursive(const wchar_t* dirPath,
 }
 
 bool HasPendingJournal(const wchar_t* gameRoot) {
-    wchar_t journalPath[MAX_PATH];
-    swprintf_s(journalPath, L"%s\\.updaterbackups\\pending.journal", gameRoot);
-    DWORD attrs = GetFileAttributesW(journalPath);
+    std::wstring journalPath = std::wstring(gameRoot) + L"\\.updaterbackups\\pending.journal";
+    if (journalPath.size() >= MAX_PATH) return false;
+    DWORD attrs = GetFileAttributesW(journalPath.c_str());
     return (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY));
 }
 
@@ -437,46 +437,48 @@ static bool DeleteDirectoryTreeWithBackup(const wchar_t* gameRoot,
                                           int maxDepth) {
     if (currentDepth > maxDepth) return false;
 
-    wchar_t searchPath[MAX_PATH];
-    swprintf_s(searchPath, L"%s\\*.*", dirPath);
+    std::wstring searchPath = std::wstring(dirPath) + L"\\*.*";
+    if (searchPath.size() >= MAX_PATH) return false;
 
     WIN32_FIND_DATAW fd;
-    HANDLE hFind = FindFirstFileW(searchPath, &fd);
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &fd);
     if (hFind == INVALID_HANDLE_VALUE) return true;
 
     do {
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
 
+        std::wstring itemPath = std::wstring(dirPath) + L"\\" + fd.cFileName;
+        if (itemPath.size() >= MAX_PATH) continue;
+
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
-            wchar_t linkPath[MAX_PATH];
-            swprintf_s(linkPath, L"%s\\%s", dirPath, fd.cFileName);
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                RemoveDirectoryW(linkPath);
+                RemoveDirectoryW(itemPath.c_str());
             } else {
-                DeleteFileW(linkPath);
+                DeleteFileW(itemPath.c_str());
             }
             continue;
         }
 
-        wchar_t subPath[MAX_PATH];
-        swprintf_s(subPath, L"%s\\%s", dirPath, fd.cFileName);
-
         std::wstring subRel = relDir;
         if (!subRel.empty() && subRel.back() != L'\\') subRel.push_back(L'\\');
         subRel.append(fd.cFileName);
+        if (subRel.size() >= MAX_PATH) continue;
 
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            DeleteDirectoryTreeWithBackup(gameRoot, subPath, subRel.c_str(), backupDeletedDir, jf, currentDepth + 1, maxDepth);
-            RemoveDirectoryW(subPath);
+            DeleteDirectoryTreeWithBackup(gameRoot, itemPath.c_str(), subRel.c_str(), backupDeletedDir, jf, currentDepth + 1, maxDepth);
+            RemoveDirectoryW(itemPath.c_str());
         } else {
             if (!IsProtectedPath(gameRoot, subRel.c_str())) {
                 if (backupDeletedDir && backupDeletedDir[0]) {
-                    wchar_t bDst[MAX_PATH];
-                    swprintf_s(bDst, L"%s\\%ls", backupDeletedDir, subRel.c_str());
-                    EnsureParentDirectoryExists(bDst);
-                    MoveFileExW(subPath, bDst, MOVEFILE_REPLACE_EXISTING);
+                    std::wstring bDst = std::wstring(backupDeletedDir) + L"\\" + subRel;
+                    if (bDst.size() < MAX_PATH) {
+                        EnsureParentDirectoryExists(bDst.c_str());
+                        MoveFileExW(itemPath.c_str(), bDst.c_str(), MOVEFILE_REPLACE_EXISTING);
+                    } else {
+                        DeleteFileW(itemPath.c_str());
+                    }
                 } else {
-                    DeleteFileW(subPath);
+                    DeleteFileW(itemPath.c_str());
                 }
                 if (jf) {
                     fwprintf(jf, L"DELETED_TXT=%ls\n", subRel.c_str());
@@ -503,18 +505,24 @@ bool ProcessDeletionsWithJournal(const wchar_t* gameRoot,
         outResult->success = true;
     }
 
-    wchar_t delPath[MAX_PATH];
-    swprintf_s(delPath, L"%s\\delete.txt", stageDir);
+    std::wstring delPath = std::wstring(stageDir) + L"\\delete.txt";
+    if (delPath.size() >= MAX_PATH) {
+        if (outResult) {
+            outResult->success = false;
+            swprintf_s(outResult->errorMessage, L"Путь к delete.txt превышает MAX_PATH");
+        }
+        return false;
+    }
 
-    DWORD delAttrs = GetFileAttributesW(delPath);
+    DWORD delAttrs = GetFileAttributesW(delPath.c_str());
     if (delAttrs == INVALID_FILE_ATTRIBUTES || (delAttrs & FILE_ATTRIBUTE_DIRECTORY)) {
         return true;
     }
 
     FILE* f = nullptr;
-    _wfopen_s(&f, delPath, L"r, ccs=UTF-8");
+    _wfopen_s(&f, delPath.c_str(), L"r, ccs=UTF-8");
     if (!f) {
-        _wfopen_s(&f, delPath, L"r");
+        _wfopen_s(&f, delPath.c_str(), L"r");
         if (!f) return true;
     }
 
@@ -533,6 +541,12 @@ bool ProcessDeletionsWithJournal(const wchar_t* gameRoot,
 
         for (wchar_t* c = p; *c; c++) {
             if (*c == L'/') *c = L'\\';
+        }
+
+        std::wstring rawRel = p;
+        if (rawRel.size() >= MAX_PATH) {
+            LogUpdate(gameRoot, L"DELETE", L"ERROR", p, L"Path exceeds MAX_PATH limit");
+            continue;
         }
 
         wchar_t canonDst[MAX_PATH];
@@ -570,12 +584,15 @@ bool ProcessDeletionsWithJournal(const wchar_t* gameRoot,
         }
 
         if (backupDeletedDir && backupDeletedDir[0]) {
-            wchar_t backupDst[MAX_PATH];
-            swprintf_s(backupDst, L"%s\\%ls", backupDeletedDir, p);
-            EnsureParentDirectoryExists(backupDst);
+            std::wstring backupDst = std::wstring(backupDeletedDir) + L"\\" + p;
+            if (backupDst.size() < MAX_PATH) {
+                EnsureParentDirectoryExists(backupDst.c_str());
 
-            if (!MoveFileExW(canonDst, backupDst, MOVEFILE_REPLACE_EXISTING)) {
-                CopyFileW(canonDst, backupDst, FALSE);
+                if (!MoveFileExW(canonDst, backupDst.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+                    CopyFileW(canonDst, backupDst.c_str(), FALSE);
+                    DeleteFileW(canonDst);
+                }
+            } else {
                 DeleteFileW(canonDst);
             }
         } else {
@@ -590,7 +607,7 @@ bool ProcessDeletionsWithJournal(const wchar_t* gameRoot,
     }
 
     fclose(f);
-    DeleteFileW(delPath);
+    DeleteFileW(delPath.c_str());
     return true;
 }
 
@@ -770,6 +787,25 @@ bool ApplyUpdate(const wchar_t* gameRoot,
         }
     }
 
+    // 2b. Backup installed_manifest.txt and version.txt before modifying anything
+    std::wstring liveManifestPath = std::wstring(gameRoot) + L"\\installed_manifest.txt";
+    std::wstring backupManifestPath = backupVerDir + L"\\installed_manifest.txt";
+    bool manifestBackedUp = false;
+    if (GetFileAttributesW(liveManifestPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        if (CopyFileW(liveManifestPath.c_str(), backupManifestPath.c_str(), FALSE)) {
+            manifestBackedUp = true;
+        }
+    }
+
+    std::wstring liveVerPath = std::wstring(gameRoot) + L"\\version.txt";
+    std::wstring backupVerPath = backupVerDir + L"\\version.txt";
+    bool versionBackedUp = false;
+    if (GetFileAttributesW(liveVerPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        if (CopyFileW(liveVerPath.c_str(), backupVerPath.c_str(), FALSE)) {
+            versionBackedUp = true;
+        }
+    }
+
     // 3. Open pending.journal and write initial records
     FILE* jf = nullptr;
     _wfopen_s(&jf, journalPath.c_str(), L"w, ccs=UTF-8");
@@ -784,6 +820,8 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     fwprintf(jf, L"TO_VERSION=%ls\n", toVersion ? toVersion : L"unknown");
     fwprintf(jf, L"BACKUP_DIR=%ls\n", backupVerDir.c_str());
     fwprintf(jf, L"STAGE_DIR=%ls\n", stageDir);
+    fwprintf(jf, L"BACKUP_MANIFEST=%d\n", manifestBackedUp ? 1 : 0);
+    fwprintf(jf, L"BACKUP_VERSION=%d\n", versionBackedUp ? 1 : 0);
 
     for (const auto& rel : backedUpRelFiles) {
         fwprintf(jf, L"BACKED_UP=%ls\n", rel.c_str());
@@ -796,54 +834,26 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     // 4. Phase APPLYING: Copy files from stage to gameRoot
     std::vector<std::wstring> successfullyCopied;
     bool failed = false;
+    int failedAttemptIndex = -1;
 
-    for (int i = 0; i < (int)stageFiles.size(); i++) {
-        const auto& rel = stageFiles[i];
-
-        fwprintf(jf, L"ATTEMPT=%ls\n", rel.c_str());
-        FlushJournal(jf);
-
-#ifdef TESTHOOKS
-        if (failAtFileIndex >= 0 && i == failAtFileIndex) {
-            failed = true;
-            if (outResult) swprintf_s(outResult->errorMessage, L"Имитация сбоя на файле #%d (testhook --fail-at).", i);
-            break;
-        }
-#else
-        (void)failAtFileIndex;
-#endif
-
-        std::wstring srcPath = std::wstring(stageDir) + L"\\" + rel;
-        std::wstring dstPath = std::wstring(gameRoot) + L"\\" + rel;
-        EnsureParentDirectoryExists(dstPath.c_str());
-
-        // Special handling for updater.exe self-update
-        if (_wcsicmp(rel.c_str(), L"updater.exe") == 0) {
-            std::wstring oldPath = std::wstring(gameRoot) + L"\\updater.exe.old";
-            DeleteFileW(oldPath.c_str());
-            MoveFileExW(dstPath.c_str(), oldPath.c_str(), MOVEFILE_REPLACE_EXISTING);
-        }
-
-        if (!CopyFileW(srcPath.c_str(), dstPath.c_str(), FALSE)) {
-            failed = true;
-            if (outResult) swprintf_s(outResult->errorMessage, L"Ошибка копирования файла: %ls (GetLastError: %lu)", rel.c_str(), GetLastError());
-            break;
-        }
-
-        successfullyCopied.push_back(rel);
-        fwprintf(jf, L"COPIED=%ls\n", rel.c_str());
-        FlushJournal(jf);
-    }
-
-    if (failed) {
-        // Rollback transaction!
+    // Rollback helper lambda
+    auto doFullRollback = [&](int failedIdx) -> bool {
         fwprintf(jf, L"STATUS=ROLLING_BACK\n");
         FlushJournal(jf);
 
         bool rollbackIncomplete = false;
         int rollbackCount = 0;
 
-        for (const auto& rel : successfullyCopied) {
+        // Rollback successfully copied files PLUS the file from failed attempt (Point 3)
+        std::vector<std::wstring> filesToRollback = successfullyCopied;
+        if (failedIdx >= 0 && failedIdx < (int)stageFiles.size()) {
+            const auto& failedRel = stageFiles[failedIdx];
+            if (std::find(filesToRollback.begin(), filesToRollback.end(), failedRel) == filesToRollback.end()) {
+                filesToRollback.push_back(failedRel);
+            }
+        }
+
+        for (const auto& rel : filesToRollback) {
             std::wstring dstPath = std::wstring(gameRoot) + L"\\" + rel;
             std::wstring backupSrc = backupFilesDir + L"\\" + rel;
 
@@ -860,10 +870,37 @@ bool ApplyUpdate(const wchar_t* gameRoot,
             rollbackCount++;
         }
 
+        // Restore any deleted files from backup
+        DWORD delAttrs = GetFileAttributesW(backupDeletedDir.c_str());
+        if (delAttrs != INVALID_FILE_ATTRIBUTES && (delAttrs & FILE_ATTRIBUTE_DIRECTORY)) {
+            std::vector<std::wstring> allDelFiles;
+            CollectFilesRecursive(backupDeletedDir.c_str(), backupDeletedDir.c_str(), allDelFiles);
+            for (const auto& rel : allDelFiles) {
+                std::wstring delSrc = backupDeletedDir + L"\\" + rel;
+                std::wstring dstPath = std::wstring(gameRoot) + L"\\" + rel;
+                EnsureParentDirectoryExists(dstPath.c_str());
+                if (!MoveFileExW(delSrc.c_str(), dstPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+                    rollbackIncomplete = true;
+                }
+            }
+        }
+
         std::wstring oldPath = std::wstring(gameRoot) + L"\\updater.exe.old";
         std::wstring livePath = std::wstring(gameRoot) + L"\\updater.exe";
         if (GetFileAttributesW(oldPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
             MoveFileExW(oldPath.c_str(), livePath.c_str(), MOVEFILE_REPLACE_EXISTING);
+        }
+
+        // Point 3: restore installed_manifest.txt and version.txt
+        if (manifestBackedUp) {
+            CopyFileW(backupManifestPath.c_str(), liveManifestPath.c_str(), FALSE);
+        } else {
+            DeleteFileW(liveManifestPath.c_str());
+        }
+        if (versionBackedUp) {
+            CopyFileW(backupVerPath.c_str(), liveVerPath.c_str(), FALSE);
+        } else {
+            DeleteFileW(liveVerPath.c_str());
         }
 
         if (rollbackIncomplete) {
@@ -890,6 +927,50 @@ bool ApplyUpdate(const wchar_t* gameRoot,
             outResult->filesRolledBack = rollbackCount;
         }
         return false;
+    };
+
+    for (int i = 0; i < (int)stageFiles.size(); i++) {
+        const auto& rel = stageFiles[i];
+
+        fwprintf(jf, L"ATTEMPT=%ls\n", rel.c_str());
+        FlushJournal(jf);
+
+#ifdef TESTHOOKS
+        if (failAtFileIndex >= 0 && i == failAtFileIndex) {
+            failed = true;
+            failedAttemptIndex = i;
+            if (outResult) swprintf_s(outResult->errorMessage, L"Имитация сбоя на файле #%d (testhook --fail-at).", i);
+            break;
+        }
+#else
+        (void)failAtFileIndex;
+#endif
+
+        std::wstring srcPath = std::wstring(stageDir) + L"\\" + rel;
+        std::wstring dstPath = std::wstring(gameRoot) + L"\\" + rel;
+        EnsureParentDirectoryExists(dstPath.c_str());
+
+        // Special handling for updater.exe self-update
+        if (_wcsicmp(rel.c_str(), L"updater.exe") == 0) {
+            std::wstring oldPath = std::wstring(gameRoot) + L"\\updater.exe.old";
+            DeleteFileW(oldPath.c_str());
+            MoveFileExW(dstPath.c_str(), oldPath.c_str(), MOVEFILE_REPLACE_EXISTING);
+        }
+
+        if (!CopyFileW(srcPath.c_str(), dstPath.c_str(), FALSE)) {
+            failed = true;
+            failedAttemptIndex = i;
+            if (outResult) swprintf_s(outResult->errorMessage, L"Ошибка копирования файла: %ls (GetLastError: %lu)", rel.c_str(), GetLastError());
+            break;
+        }
+
+        successfullyCopied.push_back(rel);
+        fwprintf(jf, L"COPIED=%ls\n", rel.c_str());
+        FlushJournal(jf);
+    }
+
+    if (failed) {
+        return doFullRollback(failedAttemptIndex);
     }
 
     // 5. Phase DELETING: old installed_manifest.txt orphans + delete.txt
@@ -897,7 +978,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     FlushJournal(jf);
 
     // 2.4: Clean orphans from previous installed_manifest.txt
-    std::wstring manifestPath = std::wstring(gameRoot) + L"\\installed_manifest.txt";
+    std::wstring manifestPath = liveManifestPath;
     FILE* oldMf = nullptr;
     _wfopen_s(&oldMf, manifestPath.c_str(), L"r, ccs=UTF-8");
     if (!oldMf) {
@@ -957,27 +1038,51 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     fwprintf(jf, L"STATUS=FINALIZING\n");
     FlushJournal(jf);
 
-    // Write new installed_manifest.txt
+#ifdef TESTHOOKS
+    if (failAtFileIndex == 9999) { // testhook for crash in FINALIZING
+        fclose(jf);
+        if (outResult) swprintf_s(outResult->errorMessage, L"Имитация краша в FINALIZING (testhook).");
+        return false;
+    }
+#endif
+
+    // Write new installed_manifest.txt atomically via .tmp + MoveFileExW
+    std::wstring manifestTmp = manifestPath + L".tmp";
     FILE* newMf = nullptr;
-    _wfopen_s(&newMf, manifestPath.c_str(), L"w, ccs=UTF-8");
-    if (newMf) {
-        for (const auto& rel : stageFiles) {
-            std::wstring norm = rel;
-            for (wchar_t& c : norm) {
-                if (c == L'/') c = L'\\';
-            }
-            fwprintf(newMf, L"%ls\n", norm.c_str());
+    _wfopen_s(&newMf, manifestTmp.c_str(), L"w, ccs=UTF-8");
+    if (!newMf) {
+        if (outResult) swprintf_s(outResult->errorMessage, L"Не удалось создать временный файл манифеста.");
+        return doFullRollback(-1);
+    }
+    for (const auto& rel : stageFiles) {
+        std::wstring norm = rel;
+        for (wchar_t& c : norm) {
+            if (c == L'/') c = L'\\';
         }
-        fclose(newMf);
+        fwprintf(newMf, L"%ls\n", norm.c_str());
+    }
+    fclose(newMf);
+    if (!MoveFileExW(manifestTmp.c_str(), manifestPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        DeleteFileW(manifestTmp.c_str());
+        if (outResult) swprintf_s(outResult->errorMessage, L"Ошибка записи installed_manifest.txt (MoveFileExW)");
+        return doFullRollback(-1);
     }
 
-    // Write new version.txt
-    std::wstring verFile = std::wstring(gameRoot) + L"\\version.txt";
+    // Write new version.txt atomically via .tmp + MoveFileExW
+    std::wstring verFile = liveVerPath;
+    std::wstring verTmp = verFile + L".tmp";
     FILE* vf = nullptr;
-    _wfopen_s(&vf, verFile.c_str(), L"w");
-    if (vf) {
-        fwprintf(vf, L"%ls\n", toVersion ? toVersion : L"1.0.0");
-        fclose(vf);
+    _wfopen_s(&vf, verTmp.c_str(), L"w");
+    if (!vf) {
+        if (outResult) swprintf_s(outResult->errorMessage, L"Не удалось создать временный файл version.txt.");
+        return doFullRollback(-1);
+    }
+    fwprintf(vf, L"%ls\n", toVersion ? toVersion : L"1.0.0");
+    fclose(vf);
+    if (!MoveFileExW(verTmp.c_str(), verFile.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        DeleteFileW(verTmp.c_str());
+        if (outResult) swprintf_s(outResult->errorMessage, L"Ошибка записи version.txt (MoveFileExW)");
+        return doFullRollback(-1);
     }
 
     SafeDeleteDirectoryRecursive(stageDir);
@@ -1017,6 +1122,9 @@ bool RecoverPendingTransaction(const wchar_t* gameRoot,
 
     wchar_t line[1024];
     wchar_t backupDir[MAX_PATH] = { 0 };
+    std::wstring lastAttempt;
+    int manifestBackedUp = -1;
+    int versionBackedUp = -1;
     std::vector<std::wstring> copiedFiles;
     std::vector<std::wstring> backedUpFiles;
     std::vector<std::wstring> createdFiles;
@@ -1028,8 +1136,13 @@ bool RecoverPendingTransaction(const wchar_t* gameRoot,
 
         if (wcsncmp(line, L"BACKUP_DIR=", 11) == 0) {
             wcsncpy_s(backupDir, line + 11, MAX_PATH - 1);
+        } else if (wcsncmp(line, L"ATTEMPT=", 8) == 0) {
+            lastAttempt = line + 8;
         } else if (wcsncmp(line, L"COPIED=", 7) == 0) {
             copiedFiles.push_back(line + 7);
+            if (lastAttempt == (line + 7)) {
+                lastAttempt.clear();
+            }
         } else if (wcsncmp(line, L"BACKED_UP=", 10) == 0) {
             backedUpFiles.push_back(line + 10);
         } else if (wcsncmp(line, L"CREATED=", 8) == 0) {
@@ -1038,6 +1151,10 @@ bool RecoverPendingTransaction(const wchar_t* gameRoot,
             deletedFiles.push_back(line + 17);
         } else if (wcsncmp(line, L"DELETED_TXT=", 12) == 0) {
             deletedFiles.push_back(line + 12);
+        } else if (wcsncmp(line, L"BACKUP_MANIFEST=", 16) == 0) {
+            manifestBackedUp = _wtoi(line + 16);
+        } else if (wcsncmp(line, L"BACKUP_VERSION=", 15) == 0) {
+            versionBackedUp = _wtoi(line + 15);
         }
     }
     fclose(jf);
@@ -1045,6 +1162,13 @@ bool RecoverPendingTransaction(const wchar_t* gameRoot,
     if (backupDir[0] == L'\0') {
         DeleteFileW(journalPath.c_str());
         return false;
+    }
+
+    // Point 3: if there was an ATTEMPT without COPIED, include it in files to restore
+    if (!lastAttempt.empty()) {
+        if (std::find(copiedFiles.begin(), copiedFiles.end(), lastAttempt) == copiedFiles.end()) {
+            copiedFiles.push_back(lastAttempt);
+        }
     }
 
     // 2.2 e: Path validation on every path in the journal before touching anything!
@@ -1111,6 +1235,24 @@ bool RecoverPendingTransaction(const wchar_t* gameRoot,
     std::wstring liveUpdater = std::wstring(gameRoot) + L"\\updater.exe";
     if (GetFileAttributesW(oldUpdater.c_str()) != INVALID_FILE_ATTRIBUTES) {
         MoveFileExW(oldUpdater.c_str(), liveUpdater.c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+
+    // Point 3: Restore installed_manifest.txt
+    std::wstring liveManifest = std::wstring(gameRoot) + L"\\installed_manifest.txt";
+    std::wstring backupManifest = std::wstring(backupDir) + L"\\installed_manifest.txt";
+    if (manifestBackedUp == 1 || (manifestBackedUp == -1 && GetFileAttributesW(backupManifest.c_str()) != INVALID_FILE_ATTRIBUTES)) {
+        CopyFileW(backupManifest.c_str(), liveManifest.c_str(), FALSE);
+    } else if (manifestBackedUp == 0) {
+        DeleteFileW(liveManifest.c_str());
+    }
+
+    // Point 3: Restore version.txt
+    std::wstring liveVersion = std::wstring(gameRoot) + L"\\version.txt";
+    std::wstring backupVersion = std::wstring(backupDir) + L"\\version.txt";
+    if (versionBackedUp == 1 || (versionBackedUp == -1 && GetFileAttributesW(backupVersion.c_str()) != INVALID_FILE_ATTRIBUTES)) {
+        CopyFileW(backupVersion.c_str(), liveVersion.c_str(), FALSE);
+    } else if (versionBackedUp == 0) {
+        DeleteFileW(liveVersion.c_str());
     }
 
     DeleteFileW(journalPath.c_str());

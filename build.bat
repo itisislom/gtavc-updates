@@ -24,7 +24,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo [BUILD] Building updater.exe (x86, /MT, /W4, /O2, /utf-8)...
-cl /nologo /O2 /MT /W4 /utf-8 /DTESTHOOKS /Fe"build\updater.exe" /Fo"build/" src\updater\main.cpp src\updater\updater_core.cpp src\common\paths.cpp src\common\crypto.cpp user32.lib gdi32.lib comctl32.lib wininet.lib shell32.lib advapi32.lib bcrypt.lib
+cl /nologo /O2 /MT /W4 /utf-8 /Fe"build\updater.exe" /Fo"build/" src\updater\main.cpp src\updater\updater_core.cpp src\common\paths.cpp src\common\crypto.cpp user32.lib gdi32.lib comctl32.lib wininet.lib shell32.lib advapi32.lib bcrypt.lib
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to build updater.exe
     exit /b %ERRORLEVEL%

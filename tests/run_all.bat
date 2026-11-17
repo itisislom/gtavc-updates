@@ -26,6 +26,9 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo [RUN_ALL] 2. Compiling automated test suites...
 
+cl /nologo /O2 /MT /W4 /utf-8 /DTESTHOOKS /Fe"build\updater_test.exe" /Fo"build/" src\updater\main.cpp src\updater\updater_core.cpp src\common\paths.cpp src\common\crypto.cpp user32.lib gdi32.lib comctl32.lib wininet.lib shell32.lib advapi32.lib bcrypt.lib
+if %ERRORLEVEL% neq 0 ( echo [ERROR] Failed compiling updater_test & exit /b 1 )
+
 cl /nologo /O2 /MT /W4 /utf-8 /Fe"build\path_tests.exe" /Fo"build/" tests\path_tests.cpp src\common\paths.cpp
 if %ERRORLEVEL% neq 0 ( echo [ERROR] Failed compiling path_tests & exit /b 1 )
 

@@ -89,9 +89,12 @@ int main() {
     GetCurrentDirectoryW(MAX_PATH, repoRoot);
 
     wchar_t builtUpdater[MAX_PATH];
-    swprintf_s(builtUpdater, L"%s\\build\\updater.exe", repoRoot);
+    swprintf_s(builtUpdater, L"%s\\build\\updater_test.exe", repoRoot);
     if (GetFileAttributesW(builtUpdater) == INVALID_FILE_ATTRIBUTES) {
-        printf("FAIL: build\\updater.exe not found. Run build.bat first!\n");
+        swprintf_s(builtUpdater, L"%s\\build\\updater.exe", repoRoot);
+    }
+    if (GetFileAttributesW(builtUpdater) == INVALID_FILE_ATTRIBUTES) {
+        printf("FAIL: Neither build\\updater_test.exe nor build\\updater.exe found.\n");
         return 1;
     }
 

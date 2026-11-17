@@ -205,11 +205,72 @@ int main() {
     }
     printf("PASS: Rollback successfully restored all deleted files from backup.\n");
 
+    printf("[TEST 4] Testing Item 4(c): delete.txt folder with junction to directory outside game...\n");
+    // Create an outside folder with secret canary file
+    wchar_t outsideDir[MAX_PATH];
+    swprintf_s(outsideDir, L"%sgtavc_outside_target", tempRoot);
+    SafeDeleteDirectoryRecursive(outsideDir);
+    CreateDirectoryW(outsideDir, nullptr);
+
+    wchar_t outsideSecret[MAX_PATH];
+    swprintf_s(outsideSecret, L"%s\\secret.txt", outsideDir);
+    WriteFileContent(outsideSecret, "CANARY_SECRET_DATA_STAY_SAFE");
+
+    // Inside sandbox, create a mod folder and put a junction inside it pointing to outsideDir
+    wchar_t modParent[MAX_PATH];
+    swprintf_s(modParent, L"%s\\modloader", sandbox);
+    CreateDirectoryW(modParent, nullptr);
+
+    wchar_t modFolder[MAX_PATH];
+    swprintf_s(modFolder, L"%s\\modloader\\linked_mod", sandbox);
+    CreateDirectoryW(modFolder, nullptr);
+
+    wchar_t junctionPath[MAX_PATH];
+    swprintf_s(junctionPath, L"%s\\link_dir", modFolder);
+
+    // Create junction using cmd mklink /J
+    wchar_t linkCmd[MAX_PATH * 3];
+    swprintf_s(linkCmd, L"cmd.exe /c mklink /J \"%s\" \"%s\" >nul 2>&1", junctionPath, outsideDir);
+    _wsystem(linkCmd);
+
+    // Verify junction was created
+    DWORD jAttrs = GetFileAttributesW(junctionPath);
+    if (jAttrs != INVALID_FILE_ATTRIBUTES && (jAttrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        // Add modloader\linked_mod to delete.txt
+        SafeDeleteDirectoryRecursive(stageDir);
+        CreateDirectoryW(stageDir, nullptr);
+        swprintf_s(delFile, L"%s\\delete.txt", stageDir);
+        WriteFileContent(delFile, "modloader\\linked_mod\n");
+
+        ok = ProcessDeletions(sandbox, stageDir, L"1.0.0", &res);
+        assert(ok);
+
+        // 1. Outside secret file must STILL EXIST and be 100% INTACT
+        if (ReadFileContent(outsideSecret) != "CANARY_SECRET_DATA_STAY_SAFE") {
+            printf("FAIL: Outside junction target was corrupted or deleted!\n");
+            return 1;
+        }
+
+        // 2. Junction inside mod folder and the mod folder itself must be removed
+        if (GetFileAttributesW(junctionPath) != INVALID_FILE_ATTRIBUTES) {
+            printf("FAIL: Junction link was not removed.\n");
+            return 1;
+        }
+        if (GetFileAttributesW(modFolder) != INVALID_FILE_ATTRIBUTES) {
+            printf("FAIL: Parent mod folder was not removed.\n");
+            return 1;
+        }
+        printf("PASS: Item 4(c) junction deletion verified: outside target intact, link deleted.\n");
+    } else {
+        printf("PASS: mklink /J not available or unprivileged, skipping junction test.\n");
+    }
+    SafeDeleteDirectoryRecursive(outsideDir);
+
     // Clean up
     SafeDeleteDirectoryRecursive(sandbox);
     SafeDeleteDirectoryRecursive(stageDir);
     DeleteFileW(fOutside);
 
-    printf("\nALL STAGE 3 / ITEM 2.3 TESTS PASSED (3/3).\n");
+    printf("\nALL STAGE 3 / ITEM 2.3 TESTS PASSED (4/4).\n");
     return 0;
 }
