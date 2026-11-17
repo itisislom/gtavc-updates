@@ -165,7 +165,7 @@ bool ValidateZipContents(const wchar_t* zipPath,
     outFiles.clear();
     wchar_t tarPath[MAX_PATH];
     if (!GetTarPath(tarPath, MAX_PATH)) {
-        if (outError) swprintf_s(outError, errLen, L"Системная утилита tar.exe не найдена.");
+        if (outError) swprintf_s(outError, errLen, L"System utility tar.exe was not found.");
         return false;
     }
 
@@ -177,7 +177,7 @@ bool ValidateZipContents(const wchar_t* zipPath,
     sa.lpSecurityDescriptor = nullptr;
 
     if (!CreatePipe(&hPipeRead, &hPipeWrite, &sa, 0)) {
-        if (outError) swprintf_s(outError, errLen, L"Не удалось создать pipe для валидации архива.");
+        if (outError) swprintf_s(outError, errLen, L"Failed to create pipe for archive validation.");
         return false;
     }
     SetHandleInformation(hPipeRead, HANDLE_FLAG_INHERIT, 0);
@@ -197,7 +197,7 @@ bool ValidateZipContents(const wchar_t* zipPath,
 
     if (!ok) {
         CloseHandle(hPipeRead);
-        if (outError) swprintf_s(outError, errLen, L"Не удалось запустить tar.exe для чтения архива.");
+        if (outError) swprintf_s(outError, errLen, L"Failed to launch tar.exe to inspect archive.");
         return false;
     }
 
@@ -216,7 +216,7 @@ bool ValidateZipContents(const wchar_t* zipPath,
     CloseHandle(pi.hThread);
 
     if (exitCode != 0) {
-        if (outError) swprintf_s(outError, errLen, L"Архив повреждён или не является корректным zip (код tar: %lu).", exitCode);
+        if (outError) swprintf_s(outError, errLen, L"Archive is corrupted or not a valid zip (tar code: %lu).", exitCode);
         return false;
     }
 
@@ -258,7 +258,7 @@ bool ValidateZipContents(const wchar_t* zipPath,
 
         if (IsForbiddenArchiveEntry(wline)) {
             if (outError) {
-                swprintf_s(outError, errLen, L"Запрещённый служебный файл в архиве: %ls", wline.c_str());
+                swprintf_s(outError, errLen, L"Forbidden system file in archive: %ls", wline.c_str());
             }
             return false;
         }
@@ -267,7 +267,7 @@ bool ValidateZipContents(const wchar_t* zipPath,
         PathError pErr = PathError::Ok;
         if (!ResolveInsideRoot(gameRoot, wline.c_str(), canon, MAX_PATH, &pErr)) {
             if (outError) {
-                swprintf_s(outError, errLen, L"Zip-slip или опасный путь в архиве: %ls (ошибка %d)", wline.c_str(), (int)pErr);
+                swprintf_s(outError, errLen, L"Zip-slip or unsafe path in archive: %ls (error %d)", wline.c_str(), (int)pErr);
             }
             return false;
         }
@@ -286,7 +286,7 @@ bool ExtractZipToStage(const wchar_t* zipPath,
                        size_t errLen) {
     wchar_t tarPath[MAX_PATH];
     if (!GetTarPath(tarPath, MAX_PATH)) {
-        if (outError) swprintf_s(outError, errLen, L"Системная утилита tar.exe не найдена.");
+        if (outError) swprintf_s(outError, errLen, L"System utility tar.exe was not found.");
         return false;
     }
 
@@ -301,7 +301,7 @@ bool ExtractZipToStage(const wchar_t* zipPath,
 
     PROCESS_INFORMATION pi = { 0 };
     if (!CreateProcessW(tarPath, cmdLine, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        if (outError) swprintf_s(outError, errLen, L"Не удалось запустить процесс распаковки.");
+        if (outError) swprintf_s(outError, errLen, L"Failed to launch extraction process.");
         return false;
     }
 
@@ -312,7 +312,7 @@ bool ExtractZipToStage(const wchar_t* zipPath,
     CloseHandle(pi.hThread);
 
     if (exitCode != 0) {
-        if (outError) swprintf_s(outError, errLen, L"Ошибка распаковки архива tar.exe (код: %lu).", exitCode);
+        if (outError) swprintf_s(outError, errLen, L"Failed to extract archive via tar.exe (code: %lu).", exitCode);
         return false;
     }
 
@@ -337,13 +337,13 @@ static bool ScanDirectoryLimits(const wchar_t* dirPath,
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
 
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
-            if (outError) swprintf_s(outError, errLen, L"Обнаружен reparse point (symlink/junction) в stage: %ls", fd.cFileName);
+            if (outError) swprintf_s(outError, errLen, L"Reparse point (symlink/junction) detected in stage: %ls", fd.cFileName);
             FindClose(hFind);
             return false;
         }
 
         if (IsForbiddenArchiveEntry(fd.cFileName)) {
-            if (outError) swprintf_s(outError, errLen, L"Запрещённый служебный файл в stage: %ls", fd.cFileName);
+            if (outError) swprintf_s(outError, errLen, L"Forbidden system file in stage: %ls", fd.cFileName);
             FindClose(hFind);
             return false;
         }
@@ -359,7 +359,7 @@ static bool ScanDirectoryLimits(const wchar_t* dirPath,
         } else {
             fileCount++;
             if (fileCount > maxFiles) {
-                if (outError) swprintf_s(outError, errLen, L"Превышен лимит количества файлов в архиве (> %zu).", maxFiles);
+                if (outError) swprintf_s(outError, errLen, L"Archive file count limit exceeded (> %zu).", maxFiles);
                 FindClose(hFind);
                 return false;
             }
@@ -370,7 +370,7 @@ static bool ScanDirectoryLimits(const wchar_t* dirPath,
             totalBytes += fileSize.QuadPart;
 
             if (totalBytes > maxBytes) {
-                if (outError) swprintf_s(outError, errLen, L"Превышен лимит распакованного размера (> %llu байт).", maxBytes);
+                if (outError) swprintf_s(outError, errLen, L"Archive uncompressed size limit exceeded (> %llu bytes).", maxBytes);
                 FindClose(hFind);
                 return false;
             }
@@ -509,7 +509,7 @@ bool ProcessDeletionsWithJournal(const wchar_t* gameRoot,
     if (delPath.size() >= MAX_PATH) {
         if (outResult) {
             outResult->success = false;
-            swprintf_s(outResult->errorMessage, L"Путь к delete.txt превышает MAX_PATH");
+            swprintf_s(outResult->errorMessage, L"Path to delete.txt exceeds MAX_PATH");
         }
         return false;
     }
@@ -738,7 +738,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
             continue; // delete.txt is processed separately and never copied
         }
         if (IsForbiddenArchiveEntry(rel)) {
-            if (outResult) swprintf_s(outResult->errorMessage, L"Запрещённый файл в архиве: %ls", rel.c_str());
+            if (outResult) swprintf_s(outResult->errorMessage, L"Forbidden file in archive: %ls", rel.c_str());
             LogUpdate(gameRoot, L"APPLY", L"ERROR", rel.c_str(), L"Forbidden archive entry");
             return false;
         }
@@ -752,33 +752,33 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     for (const auto& rel : stageFiles) {
         std::wstring dstPath;
         if (!BuildSafePath(gameRoot, rel, dstPath)) {
-            if (outResult) swprintf_s(outResult->errorMessage, L"Путь превышает лимит MAX_PATH: %ls", rel.c_str());
+            if (outResult) swprintf_s(outResult->errorMessage, L"Path exceeds MAX_PATH limit: %ls", rel.c_str());
             return false;
         }
 
         wchar_t canonDst[MAX_PATH];
         PathError pErr = PathError::Ok;
         if (!ResolveInsideRoot(gameRoot, rel.c_str(), canonDst, MAX_PATH, &pErr)) {
-            if (outResult) swprintf_s(outResult->errorMessage, L"Недопустимый путь назначения: %ls", rel.c_str());
+            if (outResult) swprintf_s(outResult->errorMessage, L"Invalid target path: %ls", rel.c_str());
             return false;
         }
 
         DWORD attrs = GetFileAttributesW(canonDst);
         if (attrs != INVALID_FILE_ATTRIBUTES) {
             if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
-                if (outResult) swprintf_s(outResult->errorMessage, L"Целевой файл является reparse point: %ls", rel.c_str());
+                if (outResult) swprintf_s(outResult->errorMessage, L"Target file is a reparse point: %ls", rel.c_str());
                 return false;
             }
 
             std::wstring backupDst = backupFilesDir + L"\\" + rel;
             if (backupDst.size() >= MAX_PATH) {
-                if (outResult) swprintf_s(outResult->errorMessage, L"Путь бэкапа превышает MAX_PATH: %ls", rel.c_str());
+                if (outResult) swprintf_s(outResult->errorMessage, L"Backup path exceeds MAX_PATH: %ls", rel.c_str());
                 return false;
             }
             EnsureParentDirectoryExists(backupDst.c_str());
 
             if (!CopyFileW(canonDst, backupDst.c_str(), FALSE)) {
-                if (outResult) swprintf_s(outResult->errorMessage, L"Не удалось создать резервную копию: %ls", rel.c_str());
+                if (outResult) swprintf_s(outResult->errorMessage, L"Failed to create backup copy: %ls", rel.c_str());
                 return false;
             }
             backedUpRelFiles.push_back(rel);
@@ -810,7 +810,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     FILE* jf = nullptr;
     _wfopen_s(&jf, journalPath.c_str(), L"w, ccs=UTF-8");
     if (!jf) {
-        if (outResult) swprintf_s(outResult->errorMessage, L"Не удалось открыть журнал pending.journal для записи.");
+        if (outResult) swprintf_s(outResult->errorMessage, L"Failed to open pending.journal for writing.");
         return false;
     }
 
@@ -912,7 +912,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
                 outResult->success = false;
                 outResult->filesCopied = (int)successfullyCopied.size();
                 outResult->filesRolledBack = rollbackCount;
-                swprintf_s(outResult->errorMessage, L"Сбой обновления и неполный откат: не удалось восстановить некоторые файлы.");
+                swprintf_s(outResult->errorMessage, L"Update failure and incomplete rollback: failed to restore some files.");
             }
             return false;
         }
@@ -939,7 +939,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
         if (failAtFileIndex >= 0 && i == failAtFileIndex) {
             failed = true;
             failedAttemptIndex = i;
-            if (outResult) swprintf_s(outResult->errorMessage, L"Имитация сбоя на файле #%d (testhook --fail-at).", i);
+            if (outResult) swprintf_s(outResult->errorMessage, L"Simulated failure at file #%d (testhook --fail-at).", i);
             break;
         }
 #else
@@ -960,7 +960,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
         if (!CopyFileW(srcPath.c_str(), dstPath.c_str(), FALSE)) {
             failed = true;
             failedAttemptIndex = i;
-            if (outResult) swprintf_s(outResult->errorMessage, L"Ошибка копирования файла: %ls (GetLastError: %lu)", rel.c_str(), GetLastError());
+            if (outResult) swprintf_s(outResult->errorMessage, L"Failed to copy file: %ls (GetLastError: %lu)", rel.c_str(), GetLastError());
             break;
         }
 
@@ -1041,7 +1041,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
 #ifdef TESTHOOKS
     if (failAtFileIndex == 9999) { // testhook for crash in FINALIZING
         fclose(jf);
-        if (outResult) swprintf_s(outResult->errorMessage, L"Имитация краша в FINALIZING (testhook).");
+        if (outResult) swprintf_s(outResult->errorMessage, L"Simulated crash in FINALIZING (testhook).");
         return false;
     }
 #endif
@@ -1051,7 +1051,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     FILE* newMf = nullptr;
     _wfopen_s(&newMf, manifestTmp.c_str(), L"w, ccs=UTF-8");
     if (!newMf) {
-        if (outResult) swprintf_s(outResult->errorMessage, L"Не удалось создать временный файл манифеста.");
+        if (outResult) swprintf_s(outResult->errorMessage, L"Failed to create temporary manifest file.");
         return doFullRollback(-1);
     }
     for (const auto& rel : stageFiles) {
@@ -1064,7 +1064,7 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     fclose(newMf);
     if (!MoveFileExW(manifestTmp.c_str(), manifestPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
         DeleteFileW(manifestTmp.c_str());
-        if (outResult) swprintf_s(outResult->errorMessage, L"Ошибка записи installed_manifest.txt (MoveFileExW)");
+        if (outResult) swprintf_s(outResult->errorMessage, L"Failed to write installed_manifest.txt (MoveFileExW)");
         return doFullRollback(-1);
     }
 
@@ -1074,14 +1074,14 @@ bool ApplyUpdate(const wchar_t* gameRoot,
     FILE* vf = nullptr;
     _wfopen_s(&vf, verTmp.c_str(), L"w");
     if (!vf) {
-        if (outResult) swprintf_s(outResult->errorMessage, L"Не удалось создать временный файл version.txt.");
+        if (outResult) swprintf_s(outResult->errorMessage, L"Failed to create temporary version.txt file.");
         return doFullRollback(-1);
     }
     fwprintf(vf, L"%ls\n", toVersion ? toVersion : L"1.0.0");
     fclose(vf);
     if (!MoveFileExW(verTmp.c_str(), verFile.c_str(), MOVEFILE_REPLACE_EXISTING)) {
         DeleteFileW(verTmp.c_str());
-        if (outResult) swprintf_s(outResult->errorMessage, L"Ошибка записи version.txt (MoveFileExW)");
+        if (outResult) swprintf_s(outResult->errorMessage, L"Failed to write version.txt (MoveFileExW)");
         return doFullRollback(-1);
     }
 
@@ -1178,7 +1178,7 @@ bool RecoverPendingTransaction(const wchar_t* gameRoot,
         if (!ResolveInsideRoot(gameRoot, p.c_str(), canonDst, MAX_PATH, &pErr)) {
             LogUpdate(gameRoot, L"RECOVERY", L"ERROR", p.c_str(), L"Dangerous path in pending.journal! Aborting recovery.");
             if (outResult) {
-                swprintf_s(outResult->errorMessage, L"Обнаружен опасный путь в pending.journal: %ls. Восстановление прервано.", p.c_str());
+                swprintf_s(outResult->errorMessage, L"Unsafe path detected in pending.journal: %ls. Recovery aborted.", p.c_str());
             }
             return false;
         }

@@ -212,9 +212,9 @@ static bool FetchUrlDataDynamic(HINTERNET hInternet, const wchar_t* url, std::st
         DWORD err = GetLastError();
         if (outErrorMsg) {
             if (err == ERROR_INTERNET_TIMEOUT) {
-                swprintf_s(outErrorMsg, errLen, L"Сервер не отвечает (таймаут соединения).");
+                swprintf_s(outErrorMsg, errLen, L"Server not responding (connection timed out).");
             } else {
-                swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
+                swprintf_s(outErrorMsg, errLen, L"Unable to connect to the Internet.");
             }
         }
         return false;
@@ -230,11 +230,11 @@ static bool FetchUrlDataDynamic(HINTERNET hInternet, const wchar_t* url, std::st
         InternetCloseHandle(hUrl);
         if (outErrorMsg) {
             if (outHttpStatus == 404) {
-                swprintf_s(outErrorMsg, errLen, L"Релиз не найден на сервере (HTTP 404).");
+                swprintf_s(outErrorMsg, errLen, L"Release not found on server (HTTP 404).");
             } else if (outHttpStatus == 403 || outHttpStatus == 429) {
-                swprintf_s(outErrorMsg, errLen, L"Превышен лимит запросов к GitHub (rate limit). Подождите 1 час.");
+                swprintf_s(outErrorMsg, errLen, L"GitHub API rate limit exceeded. Please wait 1 hour.");
             } else {
-                swprintf_s(outErrorMsg, errLen, L"Ошибка сервера (HTTP %lu).", outHttpStatus);
+                swprintf_s(outErrorMsg, errLen, L"Server error (HTTP %lu).", outHttpStatus);
             }
         }
         return false;
@@ -371,11 +371,11 @@ static void UpdateSelectionView(ManagerContext* ctx) {
     int cmp = CompareSemanticVersions(item->version, ctx->localVer);
     wchar_t btnText[64];
     if (cmp > 0) {
-        swprintf_s(btnText, L"Установить %ls", item->tag);
+        swprintf_s(btnText, L"Install %ls", item->tag);
     } else if (cmp < 0) {
-        swprintf_s(btnText, L"Откатиться на %ls", item->tag);
+        swprintf_s(btnText, L"Rollback to %ls", item->tag);
     } else {
-        swprintf_s(btnText, L"Переустановить %ls", item->tag);
+        swprintf_s(btnText, L"Reinstall %ls", item->tag);
     }
     SetWindowTextW(ctx->hBtnInstall, btnText);
     EnableWindow(ctx->hBtnInstall, TRUE);
@@ -418,16 +418,16 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
             wchar_t headerBuf[256];
             swprintf_s(headerBuf,
-                       L"Текущая установленная: v%ls    |    Последняя на GitHub: %ls",
+                       L"Current installed: v%ls    |    Latest on GitHub: %ls",
                        ctx->localVer,
-                       ctx->releaseCount > 0 ? ctx->releases[0].tag : L"Неизвестно");
+                       ctx->releaseCount > 0 ? ctx->releases[0].tag : L"Unknown");
 
             ctx->hHeader = CreateWindowExW(0, L"STATIC", headerBuf,
                                            WS_CHILD | WS_VISIBLE | SS_LEFT,
                                            20, 15, 520, 20, hWnd, NULL, cs->hInstance, NULL);
             SendMessage(ctx->hHeader, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            HWND hLblList = CreateWindowExW(0, L"STATIC", L"Доступные версии (последние 5):",
+            HWND hLblList = CreateWindowExW(0, L"STATIC", L"Available Releases (Last 5):",
                                             WS_CHILD | WS_VISIBLE | SS_LEFT,
                                             20, 42, 210, 18, hWnd, NULL, cs->hInstance, NULL);
             SendMessage(hLblList, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -441,17 +441,17 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                 int cmp = CompareSemanticVersions(ctx->releases[i].version, ctx->localVer);
                 wchar_t lineBuf[128];
                 if (cmp > 0) {
-                    swprintf_s(lineBuf, L"%ls  [Новая]", ctx->releases[i].tag);
+                    swprintf_s(lineBuf, L"%ls  [New]", ctx->releases[i].tag);
                 } else if (cmp == 0) {
-                    swprintf_s(lineBuf, L"%ls  [Текущая]", ctx->releases[i].tag);
+                    swprintf_s(lineBuf, L"%ls  [Current]", ctx->releases[i].tag);
                 } else {
-                    swprintf_s(lineBuf, L"%ls  [Откат]", ctx->releases[i].tag);
+                    swprintf_s(lineBuf, L"%ls  [Rollback]", ctx->releases[i].tag);
                 }
                 SendMessageW(ctx->hList, LB_ADDSTRING, 0, (LPARAM)lineBuf);
             }
             SendMessage(ctx->hList, LB_SETCURSEL, ctx->selectedIndex, 0);
 
-            HWND hLblDesc = CreateWindowExW(0, L"STATIC", L"Описание и список изменений:",
+            HWND hLblDesc = CreateWindowExW(0, L"STATIC", L"Release Notes & Changelog:",
                                             WS_CHILD | WS_VISIBLE | SS_LEFT,
                                             245, 42, 300, 18, hWnd, NULL, cs->hInstance, NULL);
             SendMessage(hLblDesc, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -461,12 +461,12 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                                          245, 62, 300, 270, hWnd, (HMENU)IDC_EDIT_DESC, cs->hInstance, NULL);
             SendMessage(ctx->hDesc, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            ctx->hBtnInstall = CreateWindowExW(0, L"BUTTON", L"Установить",
+            ctx->hBtnInstall = CreateWindowExW(0, L"BUTTON", L"Install",
                                                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
                                                245, 345, 160, 32, hWnd, (HMENU)IDC_BTN_INSTALL, cs->hInstance, NULL);
             SendMessage(ctx->hBtnInstall, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            HWND hBtnPlay = CreateWindowExW(0, L"BUTTON", L"Играть / Закрыть",
+            HWND hBtnPlay = CreateWindowExW(0, L"BUTTON", L"Play / Close",
                                             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
                                             415, 345, 130, 32, hWnd, (HMENU)IDC_BTN_PLAY, cs->hInstance, NULL);
             SendMessage(hBtnPlay, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -503,20 +503,20 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                 wchar_t confirmMsg[512];
                 if (cmp > 0) {
                     swprintf_s(confirmMsg,
-                               L"Установить новую версию %ls?\n\n"
-                               L"Игра будет закрыта, несохранённый прогресс будет потерян.", item->tag);
+                               L"Install new version %ls?\n\n"
+                               L"The game will close and unsaved progress will be lost.", item->tag);
                 } else if (cmp < 0) {
                     swprintf_s(confirmMsg,
-                               L"Откатиться на предыдущую версию %ls?\n\n"
-                               L"Новые файлы будут удалены, а сохранённые бэкапы восстановлены.\n\n"
-                               L"Игра будет закрыта, несохранённый прогресс будет потерян.", item->tag);
+                               L"Rollback to previous version %ls?\n\n"
+                               L"Newer files will be removed and previous backups restored.\n\n"
+                               L"The game will close and unsaved progress will be lost.", item->tag);
                 } else {
                     swprintf_s(confirmMsg,
-                               L"Переустановить версию %ls?\n\n"
-                               L"Игра будет закрыта, несохранённый прогресс будет потерян.", item->tag);
+                               L"Reinstall version %ls?\n\n"
+                               L"The game will close and unsaved progress will be lost.", item->tag);
                 }
 
-                int res = MessageBoxW(hWnd, confirmMsg, L"Подтверждение обновления",
+                int res = MessageBoxW(hWnd, confirmMsg, L"Update Confirmation",
                                       MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND);
                 if (res == IDYES) {
                     wchar_t updaterPath[MAX_PATH];
@@ -524,8 +524,8 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
                     // Validate URL and version before executing updater
                     if (!ValidateUrl(item->downloadUrl) || !ValidateSemVer(item->version)) {
-                        MessageBoxW(hWnd, L"Ошибка безопасности: некорректный URL или формат версии релиза.",
-                                    L"Ошибка", MB_ICONERROR | MB_OK);
+                        MessageBoxW(hWnd, L"Security error: invalid URL or release version format.",
+                                    L"Error", MB_ICONERROR | MB_OK);
                         return 0;
                     }
 
@@ -566,9 +566,9 @@ static LRESULT CALLBACK ManagerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
                         if (!closed && IsWindow(hGame)) {
                             int ans = MessageBoxW(NULL,
-                                L"Пожалуйста, сохраните игру и закройте её для продолжения обновления.\n\n"
-                                L"Нажмите ОК для выхода из игры прямо сейчас.",
-                                L"GTA: Vice City - Закрытие игры",
+                                L"Please save your game and close it to proceed with the update.\n\n"
+                                L"Click OK to exit the game now.",
+                                L"GTA: Vice City - Game Exit",
                                 MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND);
                             if (ans == IDOK) {
                                 ExitProcess(0);
@@ -616,7 +616,7 @@ static void ShowUpdateManagerDialog(ManagerContext* ctx) {
     int posY = (scrH - winH) / 2;
 
     HWND hDlg = CreateWindowExW(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME,
-                                L"GTAVC_UpdateManagerDialog", L"GTA: Vice City - Менеджер обновлений",
+                                L"GTAVC_UpdateManagerDialog", L"GTA: Vice City - Update Manager",
                                 WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
                                 posX, posY, winW, winH,
                                 hParent, NULL, wc.hInstance, ctx);
@@ -653,11 +653,11 @@ static LRESULT CALLBACK InfoDialogWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
             HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
 
             const wchar_t* infoText =
-                L"GTA: Vice City - Система обновлений\n"
-                L"Разработчик: Ислом Садриддинов\n\n"
-                L"- Нажмите '0' во время игры в любой момент для открытия Менеджера обновлений.\n"
-                L"- У вас есть полная свобода выбора: установка обновлений, переустановка или откат.\n"
-                L"- Все обновления загружаются безопасно из официального репозитория GitHub.";
+                L"GTA: Vice City - Update System\n"
+                L"Created by Islom Sadriddinov\n\n"
+                L"- Press '0' during gameplay at any time to open the Update Manager.\n"
+                L"- You have full freedom of choice: install updates, reinstall, or rollback.\n"
+                L"- All updates are downloaded securely from official GitHub Releases.";
 
             HWND hText = CreateWindowExW(0, L"STATIC", infoText,
                                          WS_CHILD | WS_VISIBLE | SS_LEFT,
@@ -712,7 +712,7 @@ static void ShowUpdaterInfoDialog(HWND hParent) {
     int posY = (scrH - winH) / 2;
 
     HWND hDlg = CreateWindowExW(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME,
-                                L"GTAVC_UpdaterInfoDialog", L"GTA: Vice City - Обновления",
+                                L"GTAVC_UpdaterInfoDialog", L"GTA: Vice City - Update Info",
                                 WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
                                 posX, posY, winW, winH,
                                 hParent, NULL, wc.hInstance, NULL);
@@ -741,7 +741,7 @@ static void ShowUpdaterInfoDialog(HWND hParent) {
 static int FetchReleaseList(ReleaseItem* items, int maxItems, wchar_t* outErrorMsg, size_t errLen) {
     HINTERNET hInternet = InternetOpenW(L"GTAVC-UpdateChecker", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) {
-        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
+        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Unable to connect to the Internet.");
         return 0;
     }
 
@@ -767,8 +767,8 @@ static int FetchReleaseList(ReleaseItem* items, int maxItems, wchar_t* outErrorM
             if (ExtractJsonString(jsonBuf, 0, std::string::npos, "download_url", dlStr)) {
                 MultiByteToWideChar(CP_UTF8, 0, dlStr.c_str(), -1, single.downloadUrl, 1024);
             }
-            wcscpy_s(single.name, L"Релиз из version.json");
-            single.body = "Последняя опубликованная версия из манифеста.";
+            wcscpy_s(single.name, L"Release from version.json");
+            single.body = "Latest published version from manifest.";
             if (single.version[0] != L'\0' && ValidateSemVer(single.version)) {
                 items[count++] = single;
             }
@@ -803,8 +803,8 @@ static void OpenUpdateManager(HWND hGameWnd, BOOL showAlways) {
         if (showAlways) {
             ScopedCursor cursor;
             MessageBoxW(hGameWnd,
-                        netErrMsg[0] ? netErrMsg : L"Нет интернета для обновления.",
-                        L"GTA: Vice City - Обновление",
+                        netErrMsg[0] ? netErrMsg : L"Unable to connect to the Internet.",
+                        L"GTA: Vice City - Update",
                         MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
         }
         return;

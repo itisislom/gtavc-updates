@@ -91,7 +91,7 @@ static BOOL WaitForGameExitWithUI(DWORD pid, DWORD maxWaitMs) {
 
         ULONGLONG remainSec = (maxWaitMs - elapsed) / 1000;
         wchar_t statusBuf[256];
-        swprintf_s(statusBuf, L"Ожидание выхода GTA: Vice City (%llu сек)...", remainSec);
+        swprintf_s(statusBuf, L"Waiting for GTA: Vice City to exit (%llu sec)...", remainSec);
         SetStatusW(statusBuf);
 
         MSG msg;
@@ -109,13 +109,13 @@ static BOOL WaitForGameExitWithUI(DWORD pid, DWORD maxWaitMs) {
 
 static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* destPath, wchar_t* outErrorMsg, size_t errLen) {
     if (!ValidateUrl(initialUrl)) {
-        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Недопустимый URL источника.");
+        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Invalid source URL.");
         return FALSE;
     }
 
     HINTERNET hInternet = InternetOpenW(L"GTAVC-Updater", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) {
-        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
+        if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Unable to connect to the Internet.");
         return FALSE;
     }
 
@@ -132,9 +132,9 @@ static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* 
             InternetCloseHandle(hInternet);
             if (outErrorMsg) {
                 if (err == ERROR_INTERNET_TIMEOUT) {
-                    swprintf_s(outErrorMsg, errLen, L"Сервер не отвечает (таймаут соединения).");
+                    swprintf_s(outErrorMsg, errLen, L"Server not responding (connection timed out).");
                 } else {
-                    swprintf_s(outErrorMsg, errLen, L"Нет интернета для обновления.");
+                    swprintf_s(outErrorMsg, errLen, L"Unable to connect to the Internet.");
                 }
             }
             return FALSE;
@@ -149,7 +149,7 @@ static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* 
                 if (!HttpQueryInfoW(hUrl, HTTP_QUERY_LOCATION, locBuf, &locLen, NULL) || locBuf[0] == L'\0') {
                     InternetCloseHandle(hUrl);
                     InternetCloseHandle(hInternet);
-                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Пустой заголовок редиректа от сервера.");
+                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Empty redirect header from server.");
                     return FALSE;
                 }
 
@@ -158,7 +158,7 @@ static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* 
 
                 if (!ValidateRedirectTarget(locBuf)) {
                     InternetCloseHandle(hInternet);
-                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Неразрешённый хост редиректа: %ls", locBuf);
+                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Unauthorized redirect host: %ls", locBuf);
                     return FALSE;
                 }
 
@@ -166,7 +166,7 @@ static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* 
                 redirectCount++;
                 if (redirectCount > MAX_REDIRECTS) {
                     InternetCloseHandle(hInternet);
-                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Превышено максимальное количество редиректов (5).");
+                    if (outErrorMsg) swprintf_s(outErrorMsg, errLen, L"Maximum number of redirects exceeded (5).");
                     return FALSE;
                 }
                 continue;
@@ -177,11 +177,11 @@ static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* 
                 InternetCloseHandle(hInternet);
                 if (outErrorMsg) {
                     if (statusCode == 404) {
-                        swprintf_s(outErrorMsg, errLen, L"Релиз не найден на сервере (HTTP 404).");
+                        swprintf_s(outErrorMsg, errLen, L"Release not found on server (HTTP 404).");
                     } else if (statusCode == 403 || statusCode == 429) {
-                        swprintf_s(outErrorMsg, errLen, L"Превышен лимит запросов к GitHub (rate limit). Подождите 1 час.");
+                        swprintf_s(outErrorMsg, errLen, L"GitHub API rate limit exceeded. Please wait 1 hour.");
                     } else {
-                        swprintf_s(outErrorMsg, errLen, L"Ошибка сервера при скачивании (HTTP %lu).", statusCode);
+                        swprintf_s(outErrorMsg, errLen, L"Server error during download (HTTP %lu).", statusCode);
                     }
                 }
                 return FALSE;
@@ -242,12 +242,12 @@ static BOOL DownloadFileWithProgressW(const wchar_t* initialUrl, const wchar_t* 
             SetProgress(pct);
 
             wchar_t statusBuf[128];
-            swprintf_s(statusBuf, L"Загрузка: %d%% (%llu / %lu КБ)...",
+            swprintf_s(statusBuf, L"Downloading: %d%% (%llu / %lu KB)...",
                        pct, downloadedBytes / 1024, totalBytes / 1024);
             SetStatusW(statusBuf);
         } else {
             wchar_t statusBuf[128];
-            swprintf_s(statusBuf, L"Загрузка: %llu КБ...", downloadedBytes / 1024);
+            swprintf_s(statusBuf, L"Downloading: %llu KB...", downloadedBytes / 1024);
             SetStatusW(statusBuf);
         }
 
@@ -320,9 +320,9 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     if (p->localZip[0] == L'\0') {
 #endif
         if (!ValidateUrl(p->downloadUrl)) {
-            SetStatusW(L"Недопустимый URL источника.");
-            MessageBoxW(g_hWnd, L"URL источника обновления не входит в доверенный список GitHub или не использует HTTPS.",
-                        L"Ошибка безопасности", MB_ICONERROR | MB_OK);
+            SetStatusW(L"Invalid source URL.");
+            MessageBoxW(g_hWnd, L"Update source URL is not in GitHub allowlist or does not use HTTPS.",
+                        L"Security Error", MB_ICONERROR | MB_OK);
             return ExitWorkerThread(1);
         }
 #ifdef TESTHOOKS
@@ -330,19 +330,19 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
 #endif
 
     if (!ValidateSemVer(p->newVersion)) {
-        SetStatusW(L"Недопустимый формат версии.");
-        MessageBoxW(g_hWnd, L"Формат целевой версии не соответствует стандарту SemVer.",
-                    L"Ошибка валидации", MB_ICONERROR | MB_OK);
+        SetStatusW(L"Invalid version format.");
+        MessageBoxW(g_hWnd, L"Target version does not follow SemVer format standard.",
+                    L"Validation Error", MB_ICONERROR | MB_OK);
         return ExitWorkerThread(1);
     }
 
-    SetStatusW(L"Ожидание выхода GTA: Vice City (до 5 мин)...");
+    SetStatusW(L"Waiting for GTA: Vice City to exit (up to 5 min)...");
     if (!WaitForGameExitWithUI(p->gamePid, 300000)) { // 5 minutes max
         if (g_bCancelRequested) {
-            SetStatusW(L"Обновление отменено пользователем.");
+            SetStatusW(L"Update cancelled by user.");
         } else {
-            SetStatusW(L"Таймаут ожидания выхода игры.");
-            MessageBoxW(g_hWnd, L"Время ожидания выхода игры истекло.", L"Обновление отменено", MB_ICONWARNING | MB_OK);
+            SetStatusW(L"Game exit wait timeout.");
+            MessageBoxW(g_hWnd, L"Game exit wait timeout expired.", L"Update Cancelled", MB_ICONWARNING | MB_OK);
         }
         Sleep(1000);
         return ExitWorkerThread(1);
@@ -351,8 +351,8 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
 
     wchar_t tempWorkDir[MAX_PATH];
     if (!CreateSecureTempDir(tempWorkDir, MAX_PATH)) {
-        SetStatusW(L"Ошибка создания временной папки.");
-        MessageBoxW(g_hWnd, L"Не удалось создать временную директорию.", L"Ошибка", MB_ICONERROR | MB_OK);
+        SetStatusW(L"Failed to create staging directory.");
+        MessageBoxW(g_hWnd, L"Failed to create staging directory.", L"Error", MB_ICONERROR | MB_OK);
         return ExitWorkerThread(1);
     }
 
@@ -361,11 +361,11 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
 
 #ifdef TESTHOOKS
     if (p->localZip[0] != L'\0') {
-        SetStatusW(L"Использование локального архива...");
+        SetStatusW(L"Using local archive...");
         if (!CopyFileW(p->localZip, tempZip, FALSE)) {
             SafeDeleteDirectoryRecursive(tempWorkDir);
-            SetStatusW(L"Локальный архив не найден.");
-            MessageBoxW(g_hWnd, L"Локальный файл архива не найден.", L"Ошибка", MB_ICONERROR | MB_OK);
+            SetStatusW(L"Local archive file not found.");
+            MessageBoxW(g_hWnd, L"Local archive file was not found.", L"Error", MB_ICONERROR | MB_OK);
             return ExitWorkerThread(1);
         }
 
@@ -384,17 +384,17 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
         }
     } else {
 #endif
-        SetStatusW(L"Подключение к GitHub...");
+        SetStatusW(L"Connecting to GitHub...");
         SetProgress(5);
 
         wchar_t downloadErr[512] = { 0 };
         if (!DownloadFileWithProgressW(p->downloadUrl, tempZip, downloadErr, 512)) {
             SafeDeleteDirectoryRecursive(tempWorkDir);
             if (g_bCancelRequested) {
-                SetStatusW(L"Обновление отменено.");
+                SetStatusW(L"Update cancelled.");
             } else {
-                SetStatusW(downloadErr[0] ? downloadErr : L"Нет интернета для обновления.");
-                MessageBoxW(g_hWnd, downloadErr[0] ? downloadErr : L"Нет интернета для обновления.",
+                SetStatusW(downloadErr[0] ? downloadErr : L"Unable to connect to the Internet.");
+                MessageBoxW(g_hWnd, downloadErr[0] ? downloadErr : L"Unable to connect to the Internet.",
                             L"GTA: Vice City - Update Error", MB_ICONWARNING | MB_OK | MB_SETFOREGROUND);
             }
             return ExitWorkerThread(1);
@@ -402,7 +402,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
 
         // If expectedSha256 was not passed via CLI, attempt to fetch update.zip.sha256 from repository
         if (p->expectedSha256[0] == L'\0') {
-            SetStatusW(L"Получение контрольной суммы update.zip.sha256...");
+            SetStatusW(L"Fetching update.zip.sha256 checksum...");
             wchar_t shaUrl[1200];
             swprintf_s(shaUrl, L"%ls.sha256", p->downloadUrl);
             wchar_t shaDest[MAX_PATH];
@@ -427,49 +427,49 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     // Enforce mandatory SHA-256 check
     if (p->expectedSha256[0] == L'\0') {
         SafeDeleteDirectoryRecursive(tempWorkDir);
-        SetStatusW(L"Отсутствует контрольная сумма SHA-256.");
-        MessageBoxW(g_hWnd, L"Контрольная сумма update.zip.sha256 отсутствует на сервере! Установка отменена в целях безопасности.",
-                    L"Ошибка целостности", MB_ICONERROR | MB_OK);
+        SetStatusW(L"SHA-256 checksum missing.");
+        MessageBoxW(g_hWnd, L"Checksum update.zip.sha256 missing on server! Installation cancelled for security.",
+                    L"Integrity Error", MB_ICONERROR | MB_OK);
         return ExitWorkerThread(1);
     }
 
-    SetStatusW(L"Проверка контрольной суммы SHA-256...");
+    SetStatusW(L"Verifying SHA-256 checksum...");
     if (!VerifySha256(tempZip, p->expectedSha256)) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
-        SetStatusW(L"Несовпадение SHA-256 архива.");
-        MessageBoxW(g_hWnd, L"Контрольная сумма SHA-256 скачанного обновления не совпадает с ожидаемой!\nАрхив удалён.",
-                    L"Ошибка целостности", MB_ICONERROR | MB_OK);
+        SetStatusW(L"Archive SHA-256 mismatch.");
+        MessageBoxW(g_hWnd, L"SHA-256 checksum of downloaded update does not match expected!\nArchive deleted.",
+                    L"Integrity Error", MB_ICONERROR | MB_OK);
         return ExitWorkerThread(1);
     }
 
     SetProgress(75);
-    SetStatusW(L"Проверка содержимого архива...");
+    SetStatusW(L"Validating archive contents...");
 
     std::vector<std::wstring> zipFiles;
     wchar_t errBuf[512] = { 0 };
     if (!ValidateZipContents(tempZip, gameDir, zipFiles, errBuf, 512)) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
-        SetStatusW(L"Ошибка безопасности архива.");
-        MessageBoxW(g_hWnd, errBuf, L"Ошибка проверки архива", MB_ICONERROR | MB_OK);
+        SetStatusW(L"Archive security validation error.");
+        MessageBoxW(g_hWnd, errBuf, L"Archive Validation Error", MB_ICONERROR | MB_OK);
         return ExitWorkerThread(1);
     }
 
     SetProgress(82);
-    SetStatusW(L"Распаковка во временную папку...");
+    SetStatusW(L"Extracting to staging folder...");
 
     wchar_t stageDir[MAX_PATH];
     swprintf_s(stageDir, L"%s\\stage", tempWorkDir);
     if (!ExtractZipToStage(tempZip, stageDir, errBuf, 512)) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
-        SetStatusW(L"Ошибка распаковки.");
-        MessageBoxW(g_hWnd, errBuf, L"Ошибка распаковки", MB_ICONERROR | MB_OK);
+        SetStatusW(L"Extraction error.");
+        MessageBoxW(g_hWnd, errBuf, L"Extraction Error", MB_ICONERROR | MB_OK);
         return ExitWorkerThread(1);
     }
 
     if (!ValidateStageDirectory(stageDir, 20000, 2ULL * 1024 * 1024 * 1024, errBuf, 512)) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
-        SetStatusW(L"Лимит файлов или reparse point.");
-        MessageBoxW(g_hWnd, errBuf, L"Превышение лимитов архива", MB_ICONERROR | MB_OK);
+        SetStatusW(L"File limit or reparse point detected.");
+        MessageBoxW(g_hWnd, errBuf, L"Archive Limits Exceeded", MB_ICONERROR | MB_OK);
         return ExitWorkerThread(1);
     }
 
@@ -477,7 +477,7 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
     ReadCurrentVersionW(gameDir, currentVer, sizeof(currentVer) / sizeof(currentVer[0]));
 
     SetProgress(90);
-    SetStatusW(L"Применение обновления...");
+    SetStatusW(L"Applying update...");
 
     UpdateTransactionResult txRes;
 #ifdef TESTHOOKS
@@ -487,10 +487,10 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
 #endif
     if (!ApplyUpdate(gameDir, stageDir, currentVer, p->newVersion, failAtIdx, &txRes)) {
         SafeDeleteDirectoryRecursive(tempWorkDir);
-        SetStatusW(L"Сбой обновления! Произведён откат.");
+        SetStatusW(L"Update failed! Rollback performed.");
         wchar_t failMsg[1024];
-        swprintf_s(failMsg, L"Не удалось применить обновление:\n%ls\n\nВсе изменения были автоматически откатаны.", txRes.errorMessage);
-        MessageBoxW(g_hWnd, failMsg, L"Ошибка обновления", MB_ICONERROR | MB_OK);
+        swprintf_s(failMsg, L"Failed to apply update:\n%ls\n\nAll changes were automatically rolled back.", txRes.errorMessage);
+        MessageBoxW(g_hWnd, failMsg, L"Update Error", MB_ICONERROR | MB_OK);
         return ExitWorkerThread(1);
     }
 
@@ -499,14 +499,14 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
 
     SetProgress(100);
     if (p->restartGame) {
-        SetStatusW(L"Готово! Запуск GTA Vice City...");
+        SetStatusW(L"Complete! Launching GTA Vice City...");
         Sleep(1200);
 
         wchar_t exePath[MAX_PATH];
         swprintf_s(exePath, L"%s\\gta-vc.exe", gameDir);
         ShellExecuteW(NULL, L"open", exePath, NULL, gameDir, SW_SHOWNORMAL);
     } else {
-        SetStatusW(L"Готово! Версия обновлена.");
+        SetStatusW(L"Complete! Version updated.");
         Sleep(1200);
     }
 
@@ -518,7 +518,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_COMMAND:
             if (LOWORD(wParam) == IDC_BTN_CANCEL) {
                 g_bCancelRequested = TRUE;
-                SetStatusW(L"Отмена...");
+                SetStatusW(L"Cancelling...");
                 EnableWindow(g_hBtnCancel, FALSE);
                 return 0;
             }
@@ -551,8 +551,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     swprintf_s(testFile, L"%s\\.write_test", gameDir);
     HANDLE hTest = CreateFileW(testFile, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hTest == INVALID_HANDLE_VALUE) {
-        MessageBoxW(NULL, L"Нет прав на запись в папку игры. Запустите игру или программу с необходимыми правами доступа.",
-                    L"Ошибка прав доступа", MB_ICONERROR | MB_OK);
+        MessageBoxW(NULL, L"No write permissions to game folder. Please run with required permissions.",
+                    L"Access Denied", MB_ICONERROR | MB_OK);
         return 1;
     }
     CloseHandle(hTest);
@@ -561,18 +561,18 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     // Check for pending journal crash recovery on startup
     if (HasPendingJournal(gameDir)) {
         int choice = MessageBoxW(NULL,
-            L"Обнаружено незавершённое обновление GTA: Vice City.\n\n"
-            L"Восстановить предыдущую версию игры из резервной копии?",
-            L"Аварийное восстановление",
+            L"Incomplete GTA: Vice City update detected.\n\n"
+            L"Restore previous game version from backup?",
+            L"Emergency Recovery",
             MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND);
         if (choice == IDYES) {
             UpdateTransactionResult recRes;
             if (RecoverPendingTransaction(gameDir, &recRes)) {
-                MessageBoxW(NULL, L"Предыдущая версия игры успешно восстановлена.",
-                            L"Восстановление завершено", MB_OK | MB_ICONINFORMATION);
+                MessageBoxW(NULL, L"Previous game version was successfully restored.",
+                            L"Recovery Complete", MB_OK | MB_ICONINFORMATION);
             } else {
-                MessageBoxW(NULL, L"Ошибка восстановления из резервной копии.",
-                            L"Ошибка", MB_OK | MB_ICONERROR);
+                MessageBoxW(NULL, L"Failed to recover from backup.",
+                            L"Error", MB_OK | MB_ICONERROR);
             }
         }
     }
@@ -650,7 +650,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 
     HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
 
-    g_hStatus = CreateWindowExW(0, L"STATIC", L"Инициализация апдейтера...",
+    g_hStatus = CreateWindowExW(0, L"STATIC", L"Initializing updater...",
                                 WS_CHILD | WS_VISIBLE | SS_LEFT,
                                 20, 18, 410, 22, g_hWnd, NULL, hInstance, NULL);
     SendMessage(g_hStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -661,7 +661,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     SendMessage(g_hProgress, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
     SendMessage(g_hProgress, PBM_SETPOS, 0, 0);
 
-    g_hBtnCancel = CreateWindowExW(0, L"BUTTON", L"Отмена",
+    g_hBtnCancel = CreateWindowExW(0, L"BUTTON", L"Cancel",
                                   WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                   335, 47, 95, 26, g_hWnd, (HMENU)IDC_BTN_CANCEL, hInstance, NULL);
     SendMessage(g_hBtnCancel, WM_SETFONT, (WPARAM)hFont, TRUE);
