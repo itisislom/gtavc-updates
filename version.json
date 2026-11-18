@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
-  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.1.0/update.zip",
-  "message": "VCCoop Multiplayer and Stability Update",
+  "version": "1.1.1",
+  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.1.1/update.zip",
+  "message": "Remove incompatible WindowedMode plugin",
   "mandatory": true,
-  "sha256": "5f1c5b9af9ac208186d46147ec54047e28cdbb9b6813440c9056a0e4dfa7fcb9"
+  "sha256": "8451ba8cdbf3fcba6af70d5badf5a9243655f15d7bbfa652ce86e2c34e04b275"
 }
