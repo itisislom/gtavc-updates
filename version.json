@@ -1,7 +1,7 @@
 {
-  "version": "1.0.9",
-  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.0.9/update.zip",
-  "message": "Обновление - Aiming fixed",
+  "version": "1.1.0",
+  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.1.0/update.zip",
+  "message": "VCCoop Multiplayer and Stability Update",
   "mandatory": true,
-  "sha256": "c68a848b9d34597e2aca9f20ede2e1062dfc0ce470499348cd832bc074a5b3f4"
+  "sha256": "5f1c5b9af9ac208186d46147ec54047e28cdbb9b6813440c9056a0e4dfa7fcb9"
 }
