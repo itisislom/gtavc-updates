@@ -1,7 +1,7 @@
 {
-  "version": "1.1.1",
-  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.1.1/update.zip",
-  "message": "Remove incompatible WindowedMode plugin",
+  "version": "1.1.2",
+  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.1.2/update.zip",
+  "message": "Fix crash 0040778F in VCCoop and improve Rejoindre",
   "mandatory": true,
-  "sha256": "8451ba8cdbf3fcba6af70d5badf5a9243655f15d7bbfa652ce86e2c34e04b275"
+  "sha256": "8cae33dd43845029199c0ba8ae010fb63f164939e7f37fd3a82d65c84ce131ca"
 }
