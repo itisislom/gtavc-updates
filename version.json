@@ -1,7 +1,7 @@
 {
-  "version": "1.0.8",
-  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.0.8/update.zip",
-  "message": "BMW M3 GTR added, NoClip fix, removed patrols mod",
+  "version": "1.0.9",
+  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.0.9/update.zip",
+  "message": "Обновление - Aiming fixed",
   "mandatory": true,
-  "sha256": "d0cbb0860e8c39ebd9cc2a207e003d0a56cff272378ac60ff788cfe4ef2ebe78"
+  "sha256": "c68a848b9d34597e2aca9f20ede2e1062dfc0ce470499348cd832bc074a5b3f4"
 }
