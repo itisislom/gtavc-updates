@@ -1,7 +1,7 @@
 {
-  "version": "1.1.2",
-  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.1.2/update.zip",
-  "message": "Fix crash 0040778F in VCCoop and improve Rejoindre",
+  "version": "1.1.3",
+  "download_url": "https://github.com/itisislom/gtavc-updates/releases/download/v1.1.3/update.zip",
+  "message": "Fix player model streaming sync and map F10 menu to F8",
   "mandatory": true,
-  "sha256": "8cae33dd43845029199c0ba8ae010fb63f164939e7f37fd3a82d65c84ce131ca"
+  "sha256": "8d73db31a8f74ba9709c72b9740209378126ac9a20b1932ce180cc1d9bbb47c8"
 }
