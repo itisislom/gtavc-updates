@@ -1,0 +1,608 @@
+//-------------MAIN---------------
+
+0000:
+
+//Here I am, once again!
+wait 2000
+0@ = 1
+
+//Spawn Cortez' yacht first - just in case
+if 83CA:  not object $714 exists
+then gosub @SubCy
+end
+
+//Hello there
+:Main0
+wait 500
+03E6: remove_text_box
+
+:Main
+wait 250
+if 0256:   player $PLAYER_CHAR defined 
+then 
+
+if and
+00E1:   player 0 pressed_button 4   //action
+00E1:   player 0 pressed_button 14  //jump
+then
+
+0512: show_permanent_text_box 'TUTCML'
+
+jump to @Main2
+end
+
+end
+jump @Main
+
+:Main2
+if 0038:   $ONMISSION == 1
+then 
+fade 0 2000 ms
+wait 1000
+fade 1 300
+end
+
+:Main22
+//Let's dance!
+
+//check if helpbox displaying
+05E0: 6@ = read_memory 0x94DBCC size 4 virtual_protect 1
+if 6@ == 3
+then 0512: show_permanent_text_box 'TUTCML'
+end
+
+//control menu
+if 00E1:   player 0 pressed_button 5 //previous weapon or mouse wheel
+then
+0@ += 1
+
+if 0@ > 96
+then 0@ = 1
+end
+
+end
+
+if 00E1:   player 0 pressed_button 7 //next weapon or mouse wheel
+then
+0@ -= 1
+
+if 0@ < 1
+then 0@ = 96
+end
+
+end 
+
+if 00E1:   player 0 pressed_button 17 //shoot or lmb
+then
+01B9: set_actor $PLAYER_ACTOR armed_weapon_to 0
+
+//All hands on deck info
+if 0@ == 11
+then
+00BC: show_text_highpriority GXT 'MAHOD' time 5000 flag 1 
+wait 5000
+end
+
+//V.I.P. mission
+if and
+0@ == 72
+80DD:   not actor $PLAYER_ACTOR driving_vehicle_type #KAUFMAN 
+then jump @FKauf
+end
+
+//Cabmageddon mission
+if and
+0@ == 74
+80DD:   not actor $PLAYER_ACTOR driving_vehicle_type #KAUFMAN 
+then jump @FKauf
+end
+
+//Taxi sidemission
+if and
+0@ == 75
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//Paramedic sidemission
+if and
+0@ == 76
+80DD:   not actor $PLAYER_ACTOR driving_vehicle_type #AMBULAN 
+then jump @FVeh
+end
+
+//Firetruck sidemission
+if and
+0@ == 77
+80DD:   not actor $PLAYER_ACTOR driving_vehicle_type #FIRETRUK 
+then jump @FVeh
+end
+
+//Vigilante sidemission
+if and
+0@ == 78
+856C:   NOT actor $PLAYER_ACTOR driving_police_vehicle 
+then jump @FVeh
+end
+
+//Distribution sidemission
+if 0@ == 83
+then
+if 8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+else
+03C0: 11@ = actor $PLAYER_ACTOR car
+0397: enable_car 11@ siren 1
+01C3: remove_references_to_car 11@
+end
+end
+
+//Chopper downtown sidemission
+if and
+0@ == 84
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//Chopper ocean beach sidemission
+if and
+0@ == 85
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//Chopper vice point sidemission
+if and
+0@ == 86
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//Chopper little haiti sidemission
+if and
+0@ == 87
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//Sanchez trial by dirt
+if and
+0@ == 88
+80DD:   not actor $PLAYER_ACTOR driving_vehicle_type #SANCHEZ 
+then jump @FVeh
+end
+
+//Landstalker test track
+if and
+0@ == 89
+80DD:   not actor $PLAYER_ACTOR driving_vehicle_type #LANDSTAL 
+then jump @FVeh
+end
+
+//PCJ playground
+if and
+0@ == 90
+80DD:   not actor $PLAYER_ACTOR driving_vehicle_type #PCJ600 
+then jump @FVeh
+end
+
+//Cone crazy
+if and
+0@ == 91
+80DD:   not actor $PLAYER_ACTOR driving_vehicle_type #STALLION 
+then jump @FVeh
+end
+
+//Pizza boy
+if 0@ == 92
+then
+if 8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+if and
+8154:   not actor $PLAYER_ACTOR in_zone 'BEACH3'  // Vice Point
+8154:   not actor $PLAYER_ACTOR in_zone 'HAITI'  // Little Haiti
+8154:   not actor $PLAYER_ACTOR in_zone 'DTOWN'  // Downtown
+then jump @FPizza
+end
+end
+
+//RC Raider Pickup
+if and
+0@ == 93
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//RC Bandit Race
+if and
+0@ == 94
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//RC Baron Race
+if and
+0@ == 95
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//Checkpoint Charlie 
+if and
+0@ == 96
+8449:  NOT actor $PLAYER_ACTOR in_a_car
+then jump @FTaxi
+end
+
+//go!
+00BC: show_text_highpriority GXT 'RCRC1_7' time 2000 flag 1 
+wait 2000
+if 80E1:  NOT player 0 pressed_button 17 //shoot or lmb
+jf @Main0
+select_interior 0
+04FA: reset_sky_colors_with_fade 0
+wait 100
+start_mission 0@
+
+//Additional tunes
+
+//Shooting range sidemission
+if 0@ == 66
+then 
+$988 = 1
+04F9: set_extracolors 7 fade 0 
+select_interior 10
+end
+
+//Racing sidemission
+if 0@ == 82
+then jump @FRace
+end
+
+//Chopper downtown sidemission
+if 0@ == 84
+then 
+6@ = -569.1451
+7@ = 851.0923
+8@ = 22.8402
+9@ = 8.2256
+gosub @SubSM
+end
+
+//Chopper ocean beach sidemission
+if 0@ == 85
+then 
+6@ = 28.4463 
+7@ = -1311.761 
+8@ = 16.4712
+9@ = 0.0
+gosub @SubSM
+end
+
+//Chopper vice point sidemission
+if 0@ == 86
+then 
+6@ = 375.845 
+7@ = 332.9194 
+8@ = 11.5155
+9@ = 0.0
+gosub @SubSM
+end
+
+//Chopper vice point sidemission
+if 0@ == 87
+then 
+6@ = -886.5938 
+7@ = 236.5693 
+8@ = 13.9773
+9@ = 180.0
+gosub @SubSM
+end
+
+//Sanchez trial by dirt
+if 0@ == 88
+then 
+6@ = -425.8 
+7@ = 1407.0 
+8@ = 9.8
+9@ = 80.0
+gosub @SubSM
+end
+
+//Landstalker trial by dirt
+if 0@ == 89
+then 
+6@ = -426.0 
+7@ = 1412.5 
+8@ = 10.5
+9@ = 80.0
+gosub @SubSM
+end    
+
+//PCJ Playground
+if 0@ == 90
+then 
+6@ = 507.4 
+7@ = -308.8 
+8@ = 12.8
+9@ = 176.0
+gosub @SubSM
+end 
+
+//Cone Crazy 
+if 0@ == 91
+then 
+6@ = 127.0 
+7@ = -1158.0 
+8@ = 32.0
+9@ = 180.0
+gosub @SubSM
+end
+
+//RC Raider Pickup
+if 0@ == 93
+then 
+6@ = -1235.1
+7@ = -1235.7
+8@ = 14.0
+9@ = 0.0
+gosub @SubSM
+end
+
+//RC Bandit Race
+if 0@ == 94
+then 
+6@ = 718.465
+7@ = 701.3998
+8@ = 14.0
+9@ = 0.0
+gosub @SubSM
+end 
+
+//RC Baron Race 
+if 0@ == 95
+then 
+6@ = 307.917
+7@ = 1254.622
+8@ = 27.595
+9@ = 180.0
+gosub @SubSM
+end   
+
+//Checkpoint Charlie 
+if 0@ == 96
+then 
+6@ = -585.8
+7@ = -1506.8
+8@ = 6.0
+9@ = 250.0
+gosub @SubSM
+end 
+
+jump @Main0
+end 
+
+if 00E1:   player 0 pressed_button 19 //look behind
+then
+00BC: show_text_highpriority GXT 'M_FAIL' time 5000 flag 1 
+mission_cleanup
+045C: abort
+jump to @Main0
+end
+
+if 00E1:   player 0 pressed_button 6 //aim
+then
+jump to @Main0
+end
+
+if 00E1:   player 0 pressed_button 16 //sprint
+then 015D: set_gamespeed 5.0
+else 015D: set_gamespeed 1.0
+end
+
+if 00E1:   player 0 pressed_button 2 //look left or right
+then
+03B6: replace_model_at 117.991 -362.461 10.179 radius 80.0 from #BLDNGST2MESHDAM to #BLDNGST2MESH //construction
+03B6: replace_model_at 468.882 1006.67 20.681 radius 80.0 from #ML_TARBRUSHDAMAGE to #ML_TARBRUSH //coffee
+03B6: replace_model_at -1165.346 85.534 17.783 radius 80.0 from #LODLDBLOWN to #LODLD1 
+03B6: replace_model_at -1165.346 85.534 17.783 radius 80.0 from #HDRUGFACTORYPOL to #HDRUGFACTORYINT
+03B6: replace_model_at -1165.346 85.534 17.783 radius 80.0 from #BUILDBLOWN to #BUILD1 //mainbuilding
+029B: 1@ = init_object #HDRUGFACTORYINT at -1186.1 85.2168 16.3086 //temporary fix, can't find another
+00BC: show_text_highpriority GXT 'BNK4_37' time 5000 flag 1 
+//make haitinias friendly
+03F2: pedtype 8 remove_threat 1
+jump to @Main0
+end
+
+if 00E1:   player 0 pressed_button 13 //camera
+then
+//pole position
+$999 = 1 // open front door
+Object.Destroy($1790) //door behind 
+$1096 = 1 //exclusive strip dance
+//chariot hotel door modified
+Object.Destroy($1817)
+$1817 = Object.Init(#PH_BUILD_DR_OPEN, 569.33, 52.737, 14.616)
+//mansion modified
+Object.Destroy($1788)
+$1788 = Object.Init(#MAN_DOOROPEN, -378.542, -554.006, 21.96)
+$1001 = 2
+//golf club
+Object.Destroy($1821)
+$1821 = Object.Init(#GOLF_GATESOPEN, 107.81, 228.072, 20.989)
+Object.RemoveFromMissionCleanupList($1821)     
+//taxi 
+Object.Destroy($1785)
+//bank
+$642 = 1 // integer values 
+$251 = 1 // integer values 
+//ice factory
+if 03CA:   object $1819 exists
+then 034E: move_object $1819 to -866.689 -572.095 15.573 speed 0.0 0.0 4.5 flag 0 
+end
+03B6: replace_model_at -880.552 -575.726 11.3371 radius 8.0 from #lh_icedoor to #FAKETARGET  //bonus remove door
+//cherry poppers gate
+if 03CA:   object $1818 exists
+then 034E: move_object $1818 to -973.664 -516.25 10.092 speed 0.0 5.0 0.0 collision_check 0
+end
+//hyman condo
+$1795 = 1
+//print works
+Object.Destroy($1822)
+//biker
+Object.Destroy($1820)
+//garages
+0360: open_garage $688
+0360: open_garage $689  
+0360: open_garage $690 
+01BC: put_object $1793 at -837.134 -901.672 2.03 //cam jones
+//pier bonus
+03B6: replace_model_at -249.227 -1360.77 6.78142 radius 80.0 from #pierentrance02 to #pierentrance1
+//starfish gates bonus
+03B6: replace_model_at -378.163 -335.954 11.8024 radius 8.0 from #gate4 to #FAKETARGET 
+03B6: replace_model_at -372.609 -463.328 11.3241 radius 8.0 from #StarGate to #FAKETARGET 
+03B6: replace_model_at -499.824 -467.798 11.6810 radius 8.0 from #Mansion4gate to #FAKETARGET 
+03B6: replace_model_at -443.166 -336.168 11.7883 radius 8.0 from #gate5 to #FAKETARGET 
+//printer room
+Object.Angle($1812) = 270.0
+Object.Angle($1813) = 90.0
+//boatyard
+Object.Destroy($1786)
+022A: remove_forbidden_for_peds_cube -692.193 -1522.901 0.0 -575.311 -1453.378 30.0 
+//g-spotlight stuff
+0453: object $1807 set_rotation -140.0 0.0 0.0 
+0453: object $1808 set_rotation -150.0 0.0 157.0 
+//g-spotlight office tower
+034E: move_object $1801 to -559.476 784.807 23.279 speed 0.0 10.0 0.0 flag 0 
+034E: move_object $1802 to -559.476 779.64 23.279 speed 0.0 10.0 0.0 flag 0 
+034E: move_object $1803 to -553.563 790.595 97.917 speed 0.0 10.0 0.0 flag 0 
+034E: move_object $1804 to -553.563 785.427 97.917 speed 0.0 10.0 0.0 flag 0 
+$633 = 1
+$260 = 1 
+//Gonazalez' penthouse
+Object.Destroy($1816)
+$2254 = Object.Init(#SPAD_DR_OPEN3, 464.663, 30.336, 23.881)
+Object.RemoveFromMissionCleanupList($2254)
+Object.Destroy($1815)
+$2255 = Object.Init(#SPAD_DR_OPEN2, 461.961, 31.436, 31.24)
+Object.RemoveFromMissionCleanupList($2255)
+Object.Destroy($1814)
+$2256 = Object.Init(#SPAD_DR_OPEN1, 454.321, 31.436, 35.198)
+Object.RemoveFromMissionCleanupList($2256)
+//first part
+Object.Destroy($FILM_STUDIO_FRONT_GATE_CLOSED)
+Object.Destroy($FILM_STUDIO_BACK_GATE_CLOSED)
+$FILM_STUDIO_FRONT_GATE_OPEN = Object.Init(#CI_GATESOPEN, 10.273, 963.308, 12.258)
+Object.RemoveFromMissionCleanupList($FILM_STUDIO_FRONT_GATE_OPEN)
+$FILM_STUDIO_BACK_GATE_OPEN = Object.Init(#CI_BACKGATEOPEN, -14.381, 884.12, 13.542)
+Object.RemoveFromMissionCleanupList($FILM_STUDIO_BACK_GATE_OPEN)
+Object.Destroy($1811)
+$1810 = Object.Init(#CI_JETYGATESOPEN, -115.825, 1028.55, 11.334)
+Object.RemoveFromMissionCleanupList($1810)
+//rest of the city
+016C: restart_if_wasted at -822.7 1157.9 10.1 4.0 
+016D: restart_if_busted at -659.5 760.4 10.5 133.0 
+016C: restart_if_wasted at -885.2 -470.4 12.1 276.0 
+016D: restart_if_busted at -871.9 -682.3 10.2 328.1 
+022A: remove_forbidden_for_peds_cube 189.8 230.3 0.0 248.0 258.5 30.0 
+022A: remove_forbidden_for_peds_cube -38.0 84.3 0.0 -102.3 95.1 30.0 
+01E7: remove_forbidden_for_cars_cube 189.8 230.3 0.0 248.0 258.5 30.0 
+01E7: remove_forbidden_for_cars_cube -38.0 84.3 0.0 -102.3 95.1 30.0 
+01E7: remove_forbidden_for_cars_cube 175.0 236.1 0.0 161.0 242.4 30.0 
+01E7: remove_forbidden_for_cars_cube 149.8 231.4 0.0 136.0 235.3 30.0 
+01E7: remove_forbidden_for_cars_cube 63.4 188.6 0.0 49.4 189.7 30.0 
+Object.Destroy($1782)
+022A: remove_forbidden_for_peds_cube -214.6 -948.8 0.0 -258.7 -920.6 30.0 
+01E7: remove_forbidden_for_cars_cube -214.6 -948.8 0.0 -258.7 -920.6 30.0 
+Object.Destroy($1783)
+022A: remove_forbidden_for_peds_cube -787.8 -519.4 10.0 -657.5 -475.2 20.0 
+01E7: remove_forbidden_for_cars_cube -787.8 -519.4 10.0 -657.5 -475.2 20.0 
+022A: remove_forbidden_for_peds_cube -230.0 -464.5 10.0 56.85 -459.8 20.0 
+01E7: remove_forbidden_for_cars_cube -230.0 -464.5 10.0 165.85 -459.8 20.0 
+Object.Destroy($1779)
+Object.Destroy($1780)
+$1779 = Object.Init(#COMGATE1OPEN, -712.524, -489.428, 12.549)
+$1780 = Object.Init(#COMGATE2OPEN, -712.524, -489.428, 12.549)
+Object.RemoveFromMissionCleanupList($1779)
+Object.Destroy($1784)
+022A: remove_forbidden_for_peds_cube -99.8 1041.9 0.0 -129.0 1097.4 30.0 
+01E7: remove_forbidden_for_cars_cube -99.8 1041.9 0.0 -129.0 1097.4 30.0 
+Object.Destroy($1781)
+057D: play_bridge_status_mp3 1 
+014C: set_parked_car_generator $1844 cars_to_generate_to 101 
+014C: set_parked_car_generator $1867 cars_to_generate_to 101 
+014C: set_parked_car_generator $1842 cars_to_generate_to 101 
+014C: set_parked_car_generator $1843 cars_to_generate_to 101
+00BC: show_text_highpriority GXT 'BRID_OP' time 5000 flag 1 
+//additional stuff
+$PASSED_COK2_PHNOM_PENH_86 = 1
+jump to @Main0 
+end
+
+if 0449:   actor $PLAYER_ACTOR in_a_car  //additional wait time in car
+then 
+01E5: show_text_1number_highpriority GXT 'NUMBER' number 0@ time 100 flag 1
+wait 100
+else
+01E5: show_text_1number_highpriority GXT 'NUMBER' number 0@ time 20 flag 1
+wait 20
+end
+
+jump to @Main22
+
+//Mission requirements - show info and exit
+:FTaxi
+00BC: show_text_highpriority GXT 'SMTAXI' time 5000 flag 1 
+jump @Main0
+
+:FVeh
+00BC: show_text_highpriority GXT 'SMVEH' time 5000 flag 1 
+jump @Main0
+
+:FKauf
+00BC: show_text_highpriority GXT 'SMKAUF' time 5000 flag 1 
+jump @Main0
+
+:FRace
+00BC: show_text_highpriority GXT 'SMRACE' time 10000 flag 1 
+jump @Main0
+
+:FPizza
+00BC: show_text_highpriority GXT 'SMPIZ' time 5000 flag 1 
+jump @Main0
+
+//Extra functions
+:SubCY
+049C: $722 = scripted_path_file 0 width 90.0 
+$714 = Object.Init(#YT_MAIN_BODY, -375.499, -1322.31, 9.81124)
+$715 = Object.Init(#YT_MAIN_BODY2, -375.499, -1322.31, 9.81124)
+$716 = Object.Init(#BIG_POLY_TINGS, -375.499, -1322.71, 9.81124)
+$717 = Object.Init(#YT_DOORS14, -375.499, -1322.31, 9.81124)
+$718 = Object.Init(#YT_TMP_BOAT, -375.499, -1322.31, 9.81124)
+$719 = Object.Init(#LODMAIN_BODY, -375.499, -1322.31, 9.81124)
+$720 = Object.Init(#YT_GANGPLNK_TMP, -375.499, -1322.71, 9.81124)
+$721 = Object.Init(#YACHT_CHUNK_KB, -375.499, -1322.71, 9.81124)
+$2101 = Object.Init(#BIG_POLY_TINGS_B, -375.499, -1322.71, 9.81124)
+Object.RemoveFromMissionCleanupList($714)
+Object.RemoveFromMissionCleanupList($715)
+Object.RemoveFromMissionCleanupList($717)
+Object.RemoveFromMissionCleanupList($718)
+Object.RemoveFromMissionCleanupList($719)
+049D: attach_scripted_file $722 with_object $714 
+049D: attach_scripted_file $722 with_object $715 
+049D: attach_scripted_file $722 with_object $717 
+049D: attach_scripted_file $722 with_object $718 
+049D: attach_scripted_file $722 with_object $719 
+049E: set_scripted_file $722 speed_to 0.0 
+return
+
+:SubSM
+00A1: put_actor $PLAYER_ACTOR at 6@ 7@ 8@
+wait 100
+03A1: clear_area_with_center_at_3D_coord 6@ 7@ 8@ radius 6.9
+03C0: 11@ = actor $PLAYER_ACTOR car
+0175: set_car 11@ z_angle_to 9@
+0373: set_camera_directly_behind_player
+wait 10
+return{  __SBFTR 
