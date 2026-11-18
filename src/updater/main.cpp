@@ -413,13 +413,19 @@ static DWORD WINAPI UpdateWorkerThread(LPVOID lpParam) {
             wchar_t shaErr[512] = { 0 };
             if (DownloadFileWithProgressW(shaUrl, shaDest, shaErr, 512)) {
                 FILE* sf = nullptr;
-                _wfopen_s(&sf, shaDest, L"r");
+                _wfopen_s(&sf, shaDest, L"rb");
                 if (sf) {
-                    if (fgetws(p->expectedSha256, 65, sf)) {
-                        wchar_t* nl = wcspbrk(p->expectedSha256, L"\r\n ");
-                        if (nl) *nl = L'\0';
-                    }
+                    char rawBuf[512] = { 0 };
+                    size_t bytesRead = fread(rawBuf, 1, sizeof(rawBuf) - 1, sf);
                     fclose(sf);
+                    size_t hexCount = 0;
+                    for (size_t i = 0; i < bytesRead && hexCount < 64; i++) {
+                        char c = rawBuf[i];
+                        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+                            p->expectedSha256[hexCount++] = (wchar_t)towlower((wchar_t)c);
+                        }
+                    }
+                    p->expectedSha256[hexCount] = L'\0';
                 }
             }
         }
